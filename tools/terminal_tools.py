@@ -73,8 +73,34 @@ def git_clone(
         branch: 指定分支
     
     Returns:
-        dict: 包含 success, path, message
+        dict: 包含 success, path, message, skipped (如果需要认证)
     """
+    # 提前检测可能需要认证的仓库
+    import re
+    
+    # 检测 GitLab 或其他可能需要认证的服务
+    needs_auth_patterns = [
+        r'gitlab\.com/[^/]+/[^/]+(?!\.git$)',  # GitLab 私有仓库（无 .git 后缀）
+        r'git@',  # SSH 格式（需要 SSH key）
+        r'://[^@]+@',  # 带用户名的 URL
+    ]
+    
+    might_need_auth = any(re.search(pattern, repo_url) for pattern in needs_auth_patterns)
+    
+    if might_need_auth:
+        # 先尝试快速检查仓库是否可访问
+        test_cmd = f"git ls-remote --exit-code -h {repo_url}"
+        test_result = run_shell_command(test_cmd, timeout=10)
+        if not test_result["success"]:
+            return {
+                "success": False,
+                "skipped": True,
+                "path": "",
+                "error": "仓库需要认证访问或不存在，已跳过",
+                "message": f"跳过可能需要认证的仓库: {repo_url}",
+                "details": test_result.get("stderr", "")[:200]
+            }
+    
     # 从 URL 提取仓库名
     if target_dir is None:
         target_dir = repo_url.rstrip('/').split('/')[-1]
@@ -91,8 +117,8 @@ def git_clone(
             "message": f"仓库已存在: {full_path}"
         }
     
-    # 构建 clone 命令
-    cmd_parts = ["git", "clone"]
+    # 构建 clone 命令，禁用交互式提示
+    cmd_parts = ["GIT_TERMINAL_PROMPT=0", "git", "clone"]
     
     if depth > 0:
         cmd_parts.extend(["--depth", str(depth)])

@@ -30,8 +30,14 @@ def clone_repository(repo_url: str, target_name: Optional[str] = None) -> str:
     
     Returns:
         克隆结果的 JSON 字符串
+        如果仓库需要认证，会返回 skipped=True 并附带跳过原因
     """
     result = git_clone(repo_url, target_name)
+    
+    # 如果仓库被跳过（需要认证），抛出异常让 workflow 捕获
+    if result.get("skipped"):
+        raise Exception(f"需要认证访问（私有仓库/GitLab），已跳过: {repo_url}")
+    
     return json.dumps(result, ensure_ascii=False)
 
 
