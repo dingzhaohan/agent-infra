@@ -18,13 +18,59 @@ def get_docker_client():
         raise ConnectionError(f"无法连接到 Docker: {e}")
 
 
+def _detect_build_context(dockerfile_path: Path) -> tuple[str, str]:
+    """
+    智能检测 Docker build context
+    
+    Args:
+        dockerfile_path: Dockerfile 的路径
+    
+    Returns:
+        tuple: (context_path, relative_dockerfile_path)
+    """
+    # 读取 Dockerfile 内容分析 COPY/ADD 指令
+    try:
+        with open(dockerfile_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # 检查是否有包含仓库名的 COPY/ADD 指令
+        # 例如: COPY dolfinx/docker/some-file 或 COPY ./dolfinx/
+        import re
+        copy_pattern = r'(?:COPY|ADD)\s+(\S+)'
+        matches = re.findall(copy_pattern, content, re.IGNORECASE)
+        
+        if matches:
+            for match in matches:
+                # 如果路径包含多层级（如 xxx/yyy/zzz），说明需要更高层的 context
+                parts = match.strip().split('/')
+                if len(parts) >= 2 and not match.startswith(('http://', 'https://', '--')):
+                    # 找到第一个路径部分，检查是否是仓库名
+                    first_part = parts[0]
+                    
+                    # 尝试找到仓库根目录
+                    current = dockerfile_path.parent
+                    for _ in range(5):  # 最多向上查找5层
+                        if (current.parent / first_part).exists():
+                            # 找到了！使用这个目录作为 context
+                            context_path = str(current.parent)
+                            relative_dockerfile = str(dockerfile_path.relative_to(current.parent))
+                            return context_path, relative_dockerfile
+                        current = current.parent
+    except Exception:
+        pass
+    
+    # 默认行为：使用 Dockerfile 的父目录
+    return str(dockerfile_path.parent), dockerfile_path.name
+
+
 def build_docker_image(
     dockerfile_path: str,
     image_name: str,
     tag: str = "latest",
     build_args: Optional[dict] = None,
     no_cache: bool = False,
-    timeout: int = DOCKER_TIMEOUT
+    timeout: int = DOCKER_TIMEOUT,
+    context_path: Optional[str] = None
 ) -> dict:
     """
     构建 Docker 镜像
@@ -36,6 +82,7 @@ def build_docker_image(
         build_args: 构建参数
         no_cache: 是否禁用缓存
         timeout: 构建超时时间
+        context_path: 可选的构建上下文路径（如不指定则自动检测）
     
     Returns:
         dict: 包含 success, image_id, logs, error
@@ -44,18 +91,26 @@ def build_docker_image(
         client = get_docker_client()
         
         path = Path(dockerfile_path)
-        if path.is_file():
-            context_path = str(path.parent)
-            dockerfile = path.name
+        
+        # 如果指定了 context_path，使用它
+        if context_path:
+            build_context = context_path
+            if path.is_file():
+                dockerfile = str(path.relative_to(Path(context_path)))
+            else:
+                dockerfile = "Dockerfile"
+        elif path.is_file():
+            # 智能检测 build context
+            build_context, dockerfile = _detect_build_context(path)
         else:
-            context_path = str(path)
+            build_context = str(path)
             dockerfile = "Dockerfile"
         
         full_tag = f"{image_name}:{tag}"
         
         # 构建镜像
         image, logs = client.images.build(
-            path=context_path,
+            path=build_context,
             dockerfile=dockerfile,
             tag=full_tag,
             buildargs=build_args or {},
