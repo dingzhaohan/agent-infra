@@ -10,11 +10,17 @@
     # 部署单个工具（按 URL）
     python main.py --url "https://github.com/kinnala/scikit-fem"
     
-    # 批量部署（前5个工具）
+    # 批量部署（前5个工具，串行模式）
     python main.py --batch --limit 5
     
-    # 批量部署特定领域
-    python main.py --batch --domain "生物信息"
+    # 批量部署（并发模式，默认2个并发）
+    python main.py --batch --concurrent
+    
+    # 批量部署（并发模式，指定4个并发）
+    python main.py --batch --concurrent --workers 4
+    
+    # 批量部署特定领域（并发模式）
+    python main.py --batch --domain "科学计算" --concurrent --workers 4
     
     # 仅分析不验证
     python main.py --tool "scikit-fem" --skip-verify
@@ -24,21 +30,76 @@
 """
 import argparse
 import sys
+import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from rich.prompt import Prompt, Confirm
+from rich.logging import RichHandler
 
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import REPOS_DIR, RESULTS_DIR, OPENAI_API_KEY
+from config import REPOS_DIR, RESULTS_DIR, LOGS_DIR, OPENAI_API_KEY, MAX_CONCURRENT_TOOLS
 from utils.list_parser import parse_list_md, get_tools_by_domain, get_tools_by_name
 from workflow import RepoDeploymentWorkflow, BatchDeploymentWorkflow, deploy_single_tool
 
 console = Console()
+
+
+def setup_logging():
+    """
+    配置日志系统：同时输出到控制台和文件
+    使用北京时间（UTC+8）作为时间戳
+    """
+    # 获取北京时间
+    beijing_tz = timezone(timedelta(hours=8))
+    beijing_time = datetime.now(beijing_tz)
+    
+    # 生成日志文件名：YYYYMMDD_HHMMSS_beijing.log
+    log_filename = beijing_time.strftime("%Y%m%d_%H%M%S_beijing.log")
+    log_path = LOGS_DIR / log_filename
+    
+    # 配置根日志记录器
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    # 清除已有的处理器（避免重复）
+    logger.handlers.clear()
+    
+    # 文件处理器：详细格式，包含时间戳
+    file_handler = logging.FileHandler(log_path, encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    file_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_handler.setFormatter(file_formatter)
+    
+    # 控制台处理器：使用 RichHandler 保持美观输出
+    console_handler = RichHandler(
+        console=console,
+        show_time=False,
+        show_path=False,
+        markup=True
+    )
+    console_handler.setLevel(logging.INFO)
+    
+    # 添加处理器
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    # 记录启动信息
+    logger.info("="*60)
+    logger.info(f"开源科学工具自动化部署系统启动")
+    logger.info(f"日志文件: {log_path}")
+    logger.info(f"北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("="*60)
+    
+    return str(log_path)
 
 
 def print_banner():
@@ -113,7 +174,9 @@ def list_tools(domain: str = None, limit: int = 20):
 
 def run_single_deployment(tool_name: str = None, repo_url: str = None, skip_verify: bool = False):
     """运行单个工具部署"""
+    logger = logging.getLogger(__name__)
     console.print(Panel(f"🚀 开始部署: {tool_name or repo_url}", style="bold green"))
+    logger.info(f"开始单个工具部署: {tool_name or repo_url}")
     
     try:
         result = deploy_single_tool(
@@ -125,39 +188,78 @@ def run_single_deployment(tool_name: str = None, repo_url: str = None, skip_veri
         if result:
             if result.get("status") == "success":
                 console.print("\n[bold green]✅ 部署成功![/bold green]")
+                logger.info(f"部署成功: {tool_name or repo_url}")
             elif result.get("status") == "skipped":
                 console.print("\n[bold yellow]⏭️ 分析完成（跳过验证）[/bold yellow]")
+                logger.info(f"分析完成（跳过验证）: {tool_name or repo_url}")
             else:
                 console.print(f"\n[bold red]❌ 部署失败: {result.get('error_message', '未知错误')}[/bold red]")
+                logger.error(f"部署失败: {tool_name or repo_url}, 错误: {result.get('error_message', '未知错误')}")
         
         return result
         
     except Exception as e:
         console.print(f"\n[bold red]❌ 部署异常: {str(e)}[/bold red]")
+        logger.exception(f"部署异常: {tool_name or repo_url}")
         return None
 
 
-def run_batch_deployment(limit: int = None, domain: str = None, skip_verify: bool = False):
+def run_batch_deployment(
+    limit: int = None, 
+    domain: str = None, 
+    skip_verify: bool = False,
+    concurrent: bool = False,
+    max_workers: int = MAX_CONCURRENT_TOOLS
+):
     """运行批量部署"""
+    logger = logging.getLogger(__name__)
     tools = parse_list_md()
     
     if domain:
         tools = get_tools_by_domain(tools, domain)
         console.print(f"[yellow]筛选领域: {domain}, 共 {len(tools)} 个工具[/yellow]")
+        logger.info(f"筛选领域: {domain}, 共 {len(tools)} 个工具")
     
     if limit:
         tools = tools[:limit]
         console.print(f"[yellow]限制数量: {limit}[/yellow]")
+        logger.info(f"限制数量: {limit}")
     
-    console.print(Panel(f"🚀 开始批量部署 {len(tools)} 个工具", style="bold green"))
+    mode_text = "并发" if concurrent else "串行"
+    workers_text = f"（{max_workers} 个并发进程）" if concurrent else ""
+    console.print(Panel(f"🚀 开始批量部署 {len(tools)} 个工具 - {mode_text}模式{workers_text}", style="bold green"))
+    logger.info(f"开始批量部署: {len(tools)} 个工具, 模式={mode_text}, workers={max_workers if concurrent else 1}, skip_verify={skip_verify}")
     
-    workflow = BatchDeploymentWorkflow()
+    workflow = BatchDeploymentWorkflow(max_workers=max_workers)
     
     for response in workflow.run(
         tools=tools,
-        skip_verification=skip_verify
+        skip_verification=skip_verify,
+        concurrent=concurrent
     ):
         console.print(response.content)
+        # 也记录到日志文件
+        logger.info(response.content)
+    
+    # 批量部署完成后，自动生成报告
+    console.print("\n")
+    console.print(Panel("📊 正在生成批量部署报告...", style="bold cyan"))
+    logger.info("批量部署完成，生成汇总报告")
+    
+    try:
+        from generate_batch_report import generate_batch_report
+        
+        # 生成控制台报告
+        generate_batch_report(output_format="console")
+        
+        # 同时生成 JSON 和 Markdown 报告保存到文件
+        generate_batch_report(output_format="json")
+        generate_batch_report(output_format="markdown")
+        
+        logger.info("批量部署报告生成完成")
+    except Exception as e:
+        console.print(f"[yellow]警告: 报告生成失败: {e}[/yellow]")
+        logger.warning(f"报告生成失败: {e}")
 
 
 def interactive_mode():
@@ -178,11 +280,12 @@ def interactive_mode():
         console.print("  1. 列出可用工具")
         console.print("  2. 部署单个工具（按名称）")
         console.print("  3. 部署单个工具（按 URL）")
-        console.print("  4. 批量部署")
-        console.print("  5. 查看部署结果")
-        console.print("  6. 退出")
+        console.print("  4. 批量部署（串行模式）")
+        console.print("  5. 批量部署（并发模式）")
+        console.print("  6. 查看部署结果")
+        console.print("  7. 退出")
         
-        choice = Prompt.ask("请输入选项", choices=["1", "2", "3", "4", "5", "6"])
+        choice = Prompt.ask("请输入选项", choices=["1", "2", "3", "4", "5", "6", "7"])
         
         if choice == "1":
             domain = Prompt.ask("按领域过滤（留空显示全部）", default="")
@@ -206,10 +309,24 @@ def interactive_mode():
             run_batch_deployment(
                 limit=limit,
                 domain=domain if domain else None,
-                skip_verify=skip_verify
+                skip_verify=skip_verify,
+                concurrent=False
             )
             
         elif choice == "5":
+            domain = Prompt.ask("按领域过滤（留空处理全部）", default="")
+            limit = int(Prompt.ask("处理数量限制", default="5"))
+            max_workers = int(Prompt.ask("并发进程数", default=str(MAX_CONCURRENT_TOOLS)))
+            skip_verify = Confirm.ask("是否跳过验证？", default=True)
+            run_batch_deployment(
+                limit=limit,
+                domain=domain if domain else None,
+                skip_verify=skip_verify,
+                concurrent=True,
+                max_workers=max_workers
+            )
+            
+        elif choice == "6":
             # 查看结果
             results_files = list(RESULTS_DIR.glob("*.json"))
             if not results_files:
@@ -239,13 +356,16 @@ def interactive_mode():
                 
                 console.print(table)
             
-        elif choice == "6":
+        elif choice == "7":
             console.print("[bold blue]👋 再见！[/bold blue]")
             break
 
 
 def main():
     """主函数"""
+    # 配置日志系统（最小侵入，只在这里调用一次）
+    log_file = setup_logging()
+    
     parser = argparse.ArgumentParser(
         description="开源科学工具自动化部署系统",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -254,7 +374,8 @@ def main():
     python main.py --tool "scikit-fem"
     python main.py --url "https://github.com/kinnala/scikit-fem"
     python main.py --batch --limit 5
-    python main.py --batch --domain "生物信息"
+    python main.py --batch --concurrent --workers 4
+    python main.py --batch --domain "科学计算" --concurrent
     python main.py --interactive
     python main.py --list
         """
@@ -272,7 +393,20 @@ def main():
     parser.add_argument("--domain", "-d", help="按领域过滤")
     parser.add_argument("--skip-verify", action="store_true", help="跳过验证步骤")
     
+    # 并发选项
+    parser.add_argument("--concurrent", "-c", action="store_true", 
+                       help="使用并发模式（仅与 --batch 一起使用）")
+    parser.add_argument("--workers", "-w", type=int, default=MAX_CONCURRENT_TOOLS,
+                       help=f"并发进程数（默认: {MAX_CONCURRENT_TOOLS}，仅与 --concurrent 一起使用）")
+    
     args = parser.parse_args()
+    
+    # 验证参数组合
+    if args.concurrent and not args.batch:
+        parser.error("--concurrent 只能与 --batch 一起使用")
+    
+    if args.workers and not args.concurrent:
+        console.print("[yellow]⚠️ --workers 参数需要与 --concurrent 一起使用，将被忽略[/yellow]")
     
     # 如果没有参数，进入交互模式
     if len(sys.argv) == 1:
@@ -299,6 +433,7 @@ def main():
         sys.exit(1)
     
     print_banner()
+    console.print(f"[dim]日志文件: {log_file}[/dim]\n")
     
     # 单个工具部署
     if args.tool or args.url:
@@ -314,7 +449,9 @@ def main():
         run_batch_deployment(
             limit=args.limit,
             domain=args.domain,
-            skip_verify=args.skip_verify
+            skip_verify=args.skip_verify,
+            concurrent=args.concurrent,
+            max_workers=args.workers if args.concurrent else MAX_CONCURRENT_TOOLS
         )
         return
     
@@ -324,4 +461,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

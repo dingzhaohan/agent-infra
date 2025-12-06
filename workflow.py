@@ -254,10 +254,23 @@ class RepoDeploymentWorkflow:
             response = self.analyzer_agent.run(analysis_prompt)
             logger.info(f"分析 Agent 响应完成")
         except Exception as e:
+            error_msg = str(e)
+            
+            # 检查是否是认证/私有仓库错误
+            auth_keywords = ["需要认证", "Authentication", "Access denied", "private repository", "已跳过"]
+            if any(keyword in error_msg for keyword in auth_keywords):
+                result.status = DeploymentStatus.SKIPPED
+                result.error_message = "需要认证访问（私有仓库），已跳过"
+                yield WorkflowMessage(
+                    content=f"⏭️ 跳过需要认证的仓库: {tool.name}",
+                    level="warning"
+                )
+                return
+            
             result.status = DeploymentStatus.FAILED
-            result.error_message = f"分析 Agent 错误: {str(e)}"
+            result.error_message = f"分析 Agent 错误: {error_msg}"
             yield WorkflowMessage(
-                content=f"❌ 分析 Agent 错误: {str(e)}",
+                content=f"❌ 分析 Agent 错误: {error_msg}",
                 level="error"
             )
             return
