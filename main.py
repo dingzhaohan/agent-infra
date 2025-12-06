@@ -44,7 +44,7 @@ from rich.logging import RichHandler
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import REPOS_DIR, RESULTS_DIR, LOGS_DIR, OPENAI_API_KEY, MAX_CONCURRENT_TOOLS
-from utils.list_parser import parse_list_md, get_tools_by_domain, get_tools_by_name
+from utils.list_parser import parse_list_csv, parse_list_md, get_tools_by_domain, get_tools_by_name
 from workflow import RepoDeploymentWorkflow, BatchDeploymentWorkflow, deploy_single_tool
 
 console = Console()
@@ -171,7 +171,7 @@ def check_prerequisites(skip_docker: bool = False):
 
 def list_tools(domain: str = None, limit: int = 20):
     """列出可用工具"""
-    tools = parse_list_md()
+    tools = parse_list_csv()
     
     if domain:
         tools = get_tools_by_domain(tools, domain)
@@ -239,7 +239,7 @@ def run_batch_deployment(
 ):
     """运行批量部署"""
     logger = logging.getLogger(__name__)
-    tools = parse_list_md()
+    tools = parse_list_csv()
     
     if domain:
         tools = get_tools_by_domain(tools, domain)
