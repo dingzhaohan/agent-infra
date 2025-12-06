@@ -20,10 +20,11 @@ FROM python:{python_version}-slim
 # 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖
+# 安装系统依赖（包括 bash）
 RUN apt-get update && apt-get install -y --no-install-recommends \\
     build-essential \\
     git \\
+    bash \\
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件
@@ -35,8 +36,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制项目文件
 COPY . .
 
-# 设置入口点（根据实际情况修改）
-# CMD ["python", "main.py"]
+# 默认启动 bash，方便交互式使用
+# 如需运行特定程序，使用: docker run image python main.py
+CMD ["/bin/bash"]
 ''',
 
     "python_conda": '''# 基于 Conda 镜像
@@ -52,20 +54,20 @@ COPY environment.yml .
 RUN conda env create -f environment.yml && \\
     conda clean -afy
 
-# 激活环境
-SHELL ["conda", "run", "-n", "{env_name}", "/bin/bash", "-c"]
-
 # 复制项目文件
 COPY . .
 
-# 设置入口点
-# CMD ["conda", "run", "-n", "{env_name}", "python", "main.py"]
+# 配置 bash 以自动激活 conda 环境
+RUN echo "source activate {env_name}" >> ~/.bashrc
+
+# 默认启动 bash（会自动激活 conda 环境）
+CMD ["/bin/bash"]
 ''',
 
     "python_poetry": '''# 基于 Python 官方镜像
 FROM python:{python_version}-slim
 
-# 安装 Poetry
+# 安装 Poetry 和 bash
 ENV POETRY_VERSION=1.7.1
 ENV POETRY_HOME=/opt/poetry
 ENV PATH="$POETRY_HOME/bin:$PATH"
@@ -73,6 +75,7 @@ ENV PATH="$POETRY_HOME/bin:$PATH"
 RUN apt-get update && apt-get install -y --no-install-recommends \\
     curl \\
     build-essential \\
+    bash \\
     && curl -sSL https://install.python-poetry.org | python3 - \\
     && rm -rf /var/lib/apt/lists/*
 
@@ -91,8 +94,8 @@ COPY . .
 # 安装项目
 RUN poetry install --no-interaction --no-ansi
 
-# 设置入口点
-# CMD ["python", "-m", "your_module"]
+# 默认启动 bash
+CMD ["/bin/bash"]
 ''',
 
     "node_npm": '''# 基于 Node.js 官方镜像
@@ -201,6 +204,7 @@ FROM ubuntu:22.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \\
     libstdc++6 \\
+    bash \\
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -208,14 +212,14 @@ WORKDIR /app
 # 从构建阶段复制二进制文件（根据实际情况修改路径）
 # COPY --from=builder /app/build/bin/* /app/
 
-# 设置入口点
-# CMD ["./your_binary"]
+# 默认启动 bash，方便交互式使用
+CMD ["/bin/bash"]
 ''',
 
     "scientific_python": '''# 科学计算 Python 环境
 FROM python:{python_version}-slim
 
-# 安装系统级科学计算依赖
+# 安装系统级科学计算依赖和 bash
 RUN apt-get update && apt-get install -y --no-install-recommends \\
     build-essential \\
     gfortran \\
@@ -225,6 +229,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
     libffi-dev \\
     git \\
     wget \\
+    bash \\
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -242,6 +247,9 @@ COPY . .
 
 # 可选：安装项目本身
 # RUN pip install --no-cache-dir -e .
+
+# 默认使用 bash，方便用户交互式使用
+CMD ["/bin/bash"]
 ''',
 }
 
@@ -352,13 +360,25 @@ def create_dockerfile_generator_agent() -> Agent:
             "- 可能需要 MPI 并行支持",
             "- GPU 支持（如需要，使用 NVIDIA 基础镜像）",
             "",
+            "## 交互性要求（重要！）",
+            "**科学计算工具镜像必须支持用户交互式使用**：",
+            "1. 确保安装 bash：`apt-get install -y bash` 或 `apk add bash`",
+            "2. 使用 CMD 而不是 ENTRYPOINT（除非有特殊需求）",
+            "3. 默认 CMD 应设置为：`CMD [\"/bin/bash\"]`",
+            "4. 这样用户可以：",
+            "   - 运行 `docker run -it image /bin/bash` 进入交互式 shell",
+            "   - 运行 `docker exec -it container /bin/bash` 进入正在运行的容器",
+            "   - 自由执行各种命令和脚本",
+            "5. 避免使用限制性的 ENTRYPOINT，因为它会阻止用户覆盖启动命令",
+            "",
             "## 输出要求",
             "生成完整、可直接使用的 Dockerfile，包含：",
             "- 基础镜像选择说明",
-            "- 系统依赖安装",
+            "- 系统依赖安装（包括 bash）",
             "- 项目依赖安装",
-            "- 合适的入口点配置",
+            "- 设置 CMD [\"/bin/bash\"] 用于交互式使用",
             "- 必要的环境变量",
+            "- 避免使用 ENTRYPOINT（除非是 web 服务等特殊场景）",
         ],
         markdown=True,
         debug_mode=True,  # 显示调试信息

@@ -1,5 +1,38 @@
 # 更新日志
 
+## [2025-12-06] Dockerfile 交互性支持修复
+
+### 问题
+生成的 Dockerfile 构建的镜像不支持交互式使用：
+- 无法使用 `docker run -it image /bin/bash` 进入容器
+- 无法使用 `docker exec -it container /bin/bash` 
+- 用户无法进行调试、开发和交互式实验
+
+### 解决方案
+更新所有 Dockerfile 模板以支持交互式使用：
+
+1. **添加 bash 安装**: 确保所有模板都安装 bash
+2. **设置默认 CMD**: `CMD ["/bin/bash"]` 让容器默认启动 bash
+3. **避免 ENTRYPOINT**: 不使用限制性的 ENTRYPOINT
+4. **Agent 指令更新**: 明确要求生成支持交互式使用的 Dockerfile
+
+### 效果
+- ✅ 用户可以直接运行 `docker run -it image` 进入 bash
+- ✅ 用户可以使用 `docker exec -it container /bin/bash`
+- ✅ 保持灵活性：用户仍可运行 `docker run image python script.py`
+- ✅ Conda 环境自动激活
+
+### 修改文件
+- `agents/dockerfile_generator.py`: 更新所有交互式模板和 Agent instructions
+
+### 受影响的模板
+- `python_pip`, `python_conda`, `python_poetry`
+- `scientific_python`, `cpp_cmake`
+
+详细说明见: `DOCKERFILE_INTERACTIVE_FIX.md`
+
+---
+
 ## [2025-12-06] Docker Build Context 自动检测修复
 
 ### 问题
