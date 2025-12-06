@@ -266,15 +266,27 @@ def report_verification_result(
     }
     
     # 将结果保存到临时文件供 workflow 读取
+    # 使用环境变量传递的唯一文件名（由 workflow 生成，并发安全）
     import tempfile
     import os
-    temp_file = os.path.join(tempfile.gettempdir(), "verifier_result.json")
+    
+    # 从环境变量读取唯一的结果文件路径（workflow 设置）
+    temp_file = os.environ.get('VERIFIER_RESULT_FILE')
+    
+    if not temp_file:
+        # 降级方案：使用 UUID 生成唯一文件名（向后兼容）
+        import uuid
+        temp_file = os.path.join(tempfile.gettempdir(), f"verifier_result_{uuid.uuid4().hex}.json")
+        # 将文件路径写入环境变量供 workflow 读取
+        os.environ['VERIFIER_RESULT_FILE'] = temp_file
+    
     with open(temp_file, 'w') as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
     
     return json.dumps({
         "success": True,
         "message": "验证结果已记录",
+        "result_file": temp_file,  # 返回文件路径
         "result": result
     }, ensure_ascii=False)
 

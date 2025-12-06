@@ -425,6 +425,22 @@ class RepoDeploymentWorkflow:
         for attempt in range(max_retries):
             result.retry_count = attempt + 1
             
+            # 生成唯一的结果文件路径（并发安全）
+            import tempfile
+            import os
+            import uuid
+            
+            # 使用工具名和 UUID 生成唯一文件名
+            safe_tool_name = tool.repo_name.replace('/', '_').replace(' ', '_')
+            unique_id = uuid.uuid4().hex[:8]
+            temp_file = os.path.join(
+                tempfile.gettempdir(),
+                f"verifier_result_{safe_tool_name}_{unique_id}.json"
+            )
+            
+            # 设置环境变量供 verifier agent 使用
+            os.environ['VERIFIER_RESULT_FILE'] = temp_file
+            
             # 构建验证提示
             verification_prompt = f"""
 请验证以下工具的 Docker 部署：
@@ -458,6 +474,8 @@ class RepoDeploymentWorkflow:
                 logger.info(f"验证 Agent 响应完成")
             except Exception as e:
                 result.verification_notes = f"验证 Agent 错误: {str(e)}"
+                # 清理环境变量
+                os.environ.pop('VERIFIER_RESULT_FILE', None)
                 if attempt < max_retries - 1:
                     yield WorkflowMessage(
                         content=f"⚠️ 第 {attempt + 1} 次尝试失败，正在重试...\n原因: {result.verification_notes}",
@@ -466,9 +484,6 @@ class RepoDeploymentWorkflow:
                 continue
             
             # 读取验证结果
-            import tempfile
-            import os
-            temp_file = os.path.join(tempfile.gettempdir(), "verifier_result.json")
             verification_result = None
             
             if os.path.exists(temp_file):
@@ -478,6 +493,9 @@ class RepoDeploymentWorkflow:
                     os.remove(temp_file)  # 清理临时文件
                 except Exception as e:
                     logger.warning(f"无法读取验证结果: {e}")
+            
+            # 清理环境变量
+            os.environ.pop('VERIFIER_RESULT_FILE', None)
             
             # 根据验证结果决定下一步
             if verification_result:

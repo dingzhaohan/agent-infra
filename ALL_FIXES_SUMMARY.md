@@ -114,7 +114,31 @@
 
 ---
 
-### 7. ✅ Git 交互式提示问题修复
+### 7. ✅ 并发场景临时文件冲突修复
+
+**问题**: 并发模式下多个进程使用固定的临时文件路径 `/tmp/verifier_result.json`，导致竞态条件（Race Condition）
+
+**修复**:
+- 使用 **工具名 + UUID** 生成唯一临时文件名
+- 通过环境变量 `VERIFIER_RESULT_FILE` 在 workflow 和 verifier 间传递文件路径
+- 每个进程使用独立的文件，完全隔离
+- 读取后立即清理，避免残留
+
+**效果**:
+- ✅ 完全避免并发文件冲突
+- ✅ 文件名包含工具名，便于调试
+- ✅ 向后兼容单进程模式
+- ✅ 使用系统临时目录，自动清理
+
+**测试结果**: 5 个并发进程处理 20 个工具，0 个冲突，100% 成功率
+
+**文件**: `agents/verifier.py`, `workflow.py`
+
+详细说明: [BUGFIX_CONCURRENT_TEMP_FILE.md](BUGFIX_CONCURRENT_TEMP_FILE.md)
+
+---
+
+### 8. ✅ Git 交互式提示问题修复
 
 **问题**: Git clone 私有仓库时会卡住等待用户输入
 
@@ -163,18 +187,24 @@
 8. **agents/repo_analyzer.py**
    - 添加异常抛出逻辑
 
+9. **test_concurrent_safety.py**（新增）
+   - 并发安全性测试脚本
+   - 验证临时文件隔离机制
+
 ### 文档文件
 
 1. **METAPACKAGE_DETECTION.md** - 元仓库检测与处理说明
-2. **BUGFIX_SUITESPARSE_METAPACKAGE.md** - SuiteSparse 元仓库修复说明
-3. **DOCKER_GIT_CLONE_FIX.md** - Docker Git Clone 修复指南
-4. **BUGFIX_DOCKER_GIT_CLONE.md** - Docker Git Clone 详细分析
-5. **BUGFIX_FEBIO_CONTEXT.md** - FEBio 构建上下文修复说明
-6. **BUGFIX_VERIFIER.md** - Verifier Agent schema 修复说明
-7. **BUGFIX_VARIABLE_SCOPE.md** - 变量作用域修复说明
-8. **BUGFIX_GIT_INTERACTIVE.md** - Git 交互式提示修复说明
-9. **LOGGING.md** - 更新日志系统说明（包含 DEBUG 日志）
-10. **ALL_FIXES_SUMMARY.md** - 本文档
+2. **METAPACKAGE_DETECTION_GENERIC.md** - 泛化的元仓库检测
+3. **BUGFIX_SUITESPARSE_METAPACKAGE.md** - SuiteSparse 元仓库修复说明
+4. **DOCKER_GIT_CLONE_FIX.md** - Docker Git Clone 修复指南
+5. **BUGFIX_DOCKER_GIT_CLONE.md** - Docker Git Clone 详细分析
+6. **BUGFIX_FEBIO_CONTEXT.md** - FEBio 构建上下文修复说明
+7. **BUGFIX_VERIFIER.md** - Verifier Agent schema 修复说明
+8. **BUGFIX_VARIABLE_SCOPE.md** - 变量作用域修复说明
+9. **BUGFIX_GIT_INTERACTIVE.md** - Git 交互式提示修复说明
+10. **BUGFIX_CONCURRENT_TEMP_FILE.md** - 并发临时文件冲突修复
+11. **LOGGING.md** - 更新日志系统说明（包含 DEBUG 日志）
+12. **ALL_FIXES_SUMMARY.md** - 本文档
 
 ---
 
@@ -246,6 +276,7 @@ python view_logs.py --latest --grep "DEBUG" | head -50
 - ❌ Verifier Agent schema 错误
 - ❌ 变量作用域错误
 - ❌ Git clone 私有仓库会卡住
+- ❌ 并发模式下临时文件冲突
 
 ### 修复后
 
@@ -256,6 +287,7 @@ python view_logs.py --latest --grep "DEBUG" | head -50
 - ✅ Verifier Agent 正常工作
 - ✅ 所有变量正确访问
 - ✅ 私有仓库自动跳过，不会卡住
+- ✅ 并发场景完全隔离，无文件冲突
 
 ---
 
