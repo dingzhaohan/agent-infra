@@ -10,11 +10,17 @@
     # 部署单个工具（按 URL）
     python main.py --url "https://github.com/kinnala/scikit-fem"
     
-    # 批量部署（前5个工具）
+    # 批量部署（前5个工具，串行模式）
     python main.py --batch --limit 5
     
-    # 批量部署特定领域
-    python main.py --batch --domain "生物信息"
+    # 批量部署（并发模式，默认2个并发）
+    python main.py --batch --concurrent
+    
+    # 批量部署（并发模式，指定4个并发）
+    python main.py --batch --concurrent --workers 4
+    
+    # 批量部署特定领域（并发模式）
+    python main.py --batch --domain "科学计算" --concurrent --workers 4
     
     # 仅分析不验证
     python main.py --tool "scikit-fem" --skip-verify
@@ -34,7 +40,7 @@ from rich.prompt import Prompt, Confirm
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import REPOS_DIR, RESULTS_DIR, OPENAI_API_KEY
+from config import REPOS_DIR, RESULTS_DIR, OPENAI_API_KEY, MAX_CONCURRENT_TOOLS
 from utils.list_parser import parse_list_md, get_tools_by_domain, get_tools_by_name
 from workflow import RepoDeploymentWorkflow, BatchDeploymentWorkflow, deploy_single_tool
 
@@ -137,7 +143,13 @@ def run_single_deployment(tool_name: str = None, repo_url: str = None, skip_veri
         return None
 
 
-def run_batch_deployment(limit: int = None, domain: str = None, skip_verify: bool = False):
+def run_batch_deployment(
+    limit: int = None, 
+    domain: str = None, 
+    skip_verify: bool = False,
+    concurrent: bool = False,
+    max_workers: int = MAX_CONCURRENT_TOOLS
+):
     """运行批量部署"""
     tools = parse_list_md()
     
@@ -149,13 +161,16 @@ def run_batch_deployment(limit: int = None, domain: str = None, skip_verify: boo
         tools = tools[:limit]
         console.print(f"[yellow]限制数量: {limit}[/yellow]")
     
-    console.print(Panel(f"🚀 开始批量部署 {len(tools)} 个工具", style="bold green"))
+    mode_text = "并发" if concurrent else "串行"
+    workers_text = f"（{max_workers} 个并发进程）" if concurrent else ""
+    console.print(Panel(f"🚀 开始批量部署 {len(tools)} 个工具 - {mode_text}模式{workers_text}", style="bold green"))
     
-    workflow = BatchDeploymentWorkflow()
+    workflow = BatchDeploymentWorkflow(max_workers=max_workers)
     
     for response in workflow.run(
         tools=tools,
-        skip_verification=skip_verify
+        skip_verification=skip_verify,
+        concurrent=concurrent
     ):
         console.print(response.content)
 
@@ -178,11 +193,12 @@ def interactive_mode():
         console.print("  1. 列出可用工具")
         console.print("  2. 部署单个工具（按名称）")
         console.print("  3. 部署单个工具（按 URL）")
-        console.print("  4. 批量部署")
-        console.print("  5. 查看部署结果")
-        console.print("  6. 退出")
+        console.print("  4. 批量部署（串行模式）")
+        console.print("  5. 批量部署（并发模式）")
+        console.print("  6. 查看部署结果")
+        console.print("  7. 退出")
         
-        choice = Prompt.ask("请输入选项", choices=["1", "2", "3", "4", "5", "6"])
+        choice = Prompt.ask("请输入选项", choices=["1", "2", "3", "4", "5", "6", "7"])
         
         if choice == "1":
             domain = Prompt.ask("按领域过滤（留空显示全部）", default="")
@@ -206,10 +222,24 @@ def interactive_mode():
             run_batch_deployment(
                 limit=limit,
                 domain=domain if domain else None,
-                skip_verify=skip_verify
+                skip_verify=skip_verify,
+                concurrent=False
             )
             
         elif choice == "5":
+            domain = Prompt.ask("按领域过滤（留空处理全部）", default="")
+            limit = int(Prompt.ask("处理数量限制", default="5"))
+            max_workers = int(Prompt.ask("并发进程数", default=str(MAX_CONCURRENT_TOOLS)))
+            skip_verify = Confirm.ask("是否跳过验证？", default=True)
+            run_batch_deployment(
+                limit=limit,
+                domain=domain if domain else None,
+                skip_verify=skip_verify,
+                concurrent=True,
+                max_workers=max_workers
+            )
+            
+        elif choice == "6":
             # 查看结果
             results_files = list(RESULTS_DIR.glob("*.json"))
             if not results_files:
@@ -239,7 +269,7 @@ def interactive_mode():
                 
                 console.print(table)
             
-        elif choice == "6":
+        elif choice == "7":
             console.print("[bold blue]👋 再见！[/bold blue]")
             break
 
@@ -254,7 +284,8 @@ def main():
     python main.py --tool "scikit-fem"
     python main.py --url "https://github.com/kinnala/scikit-fem"
     python main.py --batch --limit 5
-    python main.py --batch --domain "生物信息"
+    python main.py --batch --concurrent --workers 4
+    python main.py --batch --domain "科学计算" --concurrent
     python main.py --interactive
     python main.py --list
         """
@@ -272,7 +303,20 @@ def main():
     parser.add_argument("--domain", "-d", help="按领域过滤")
     parser.add_argument("--skip-verify", action="store_true", help="跳过验证步骤")
     
+    # 并发选项
+    parser.add_argument("--concurrent", "-c", action="store_true", 
+                       help="使用并发模式（仅与 --batch 一起使用）")
+    parser.add_argument("--workers", "-w", type=int, default=MAX_CONCURRENT_TOOLS,
+                       help=f"并发进程数（默认: {MAX_CONCURRENT_TOOLS}，仅与 --concurrent 一起使用）")
+    
     args = parser.parse_args()
+    
+    # 验证参数组合
+    if args.concurrent and not args.batch:
+        parser.error("--concurrent 只能与 --batch 一起使用")
+    
+    if args.workers and not args.concurrent:
+        console.print("[yellow]⚠️ --workers 参数需要与 --concurrent 一起使用，将被忽略[/yellow]")
     
     # 如果没有参数，进入交互模式
     if len(sys.argv) == 1:
@@ -314,7 +358,9 @@ def main():
         run_batch_deployment(
             limit=args.limit,
             domain=args.domain,
-            skip_verify=args.skip_verify
+            skip_verify=args.skip_verify,
+            concurrent=args.concurrent,
+            max_workers=args.workers if args.concurrent else MAX_CONCURRENT_TOOLS
         )
         return
     
@@ -324,4 +370,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
