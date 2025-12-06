@@ -9,8 +9,11 @@ from pathlib import Path
 from typing import Optional, Generator, Callable
 from enum import Enum
 from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import Queue, Process
+import queue
 
-from config import REPOS_DIR, RESULTS_DIR, MAX_RETRIES
+from config import REPOS_DIR, RESULTS_DIR, MAX_RETRIES, MAX_CONCURRENT_TOOLS
 from utils.list_parser import Tool, parse_list_md
 from agents.repo_analyzer import create_repo_analyzer_agent
 from agents.dockerfile_generator import create_dockerfile_generator_agent
@@ -498,17 +501,120 @@ class RepoDeploymentWorkflow:
         logger.info(f"结果已保存: {result_file}")
 
 
+def _run_single_tool_worker(tool: Tool, skip_verification: bool = False) -> dict:
+    """
+    多进程工作器函数 - 在子进程中运行单个工具的部署
+    
+    Args:
+        tool: 要部署的工具
+        skip_verification: 是否跳过验证
+    
+    Returns:
+        dict: 包含工具名称、状态和消息的结果字典
+    """
+    workflow = RepoDeploymentWorkflow()
+    messages = []
+    
+    try:
+        # 收集所有消息
+        for msg in workflow.run(tool=tool, skip_verification=skip_verification):
+            messages.append({
+                "content": msg.content,
+                "level": msg.level,
+                "tool_name": tool.name
+            })
+        
+        # 读取最终结果
+        result_file = RESULTS_DIR / f"{tool.name.replace('/', '_')}.json"
+        if result_file.exists():
+            with open(result_file, 'r') as f:
+                result_data = json.load(f)
+            status = result_data.get("status", "unknown")
+        else:
+            status = "failed"
+        
+        return {
+            "tool_name": tool.name,
+            "status": status,
+            "messages": messages,
+            "success": True
+        }
+    
+    except Exception as e:
+        messages.append({
+            "content": f"❌ 处理 {tool.name} 时发生异常: {str(e)}",
+            "level": "error",
+            "tool_name": tool.name
+        })
+        
+        return {
+            "tool_name": tool.name,
+            "status": "failed",
+            "messages": messages,
+            "success": False,
+            "error": str(e)
+        }
+
+
 class BatchDeploymentWorkflow:
     """
     批量部署工作流
     
-    处理 list.md 中的多个工具
+    处理 list.md 中的多个工具，支持串行和并发两种模式
     """
     
-    def __init__(self):
+    def __init__(self, max_workers: int = MAX_CONCURRENT_TOOLS):
+        """
+        初始化批量部署工作流
+        
+        Args:
+            max_workers: 最大并发工作进程数
+        """
         self.single_workflow = RepoDeploymentWorkflow()
+        self.max_workers = max_workers
     
     def run(
+        self,
+        tools: list[Tool] = None,
+        limit: int = None,
+        skip_verification: bool = False,
+        filter_domain: str = None,
+        concurrent: bool = False
+    ) -> Generator[WorkflowMessage, None, dict]:
+        """
+        批量执行部署工作流（支持串行和并发两种模式）
+        
+        Args:
+            tools: 工具列表（如果为空，从 list.md 读取）
+            limit: 限制处理数量
+            skip_verification: 是否跳过验证
+            filter_domain: 按领域过滤
+            concurrent: 是否使用并发模式（默认 False 串行）
+        
+        Yields:
+            WorkflowMessage: 工作流进度消息
+            
+        Returns:
+            dict: 统计结果
+        """
+        if concurrent:
+            # 使用并发模式
+            yield from self.run_concurrent(
+                tools=tools,
+                limit=limit,
+                skip_verification=skip_verification,
+                filter_domain=filter_domain
+            )
+        else:
+            # 使用串行模式
+            yield from self._run_sequential(
+                tools=tools,
+                limit=limit,
+                skip_verification=skip_verification,
+                filter_domain=filter_domain
+            )
+    
+    def _run_sequential(
         self,
         tools: list[Tool] = None,
         limit: int = None,
@@ -516,7 +622,7 @@ class BatchDeploymentWorkflow:
         filter_domain: str = None
     ) -> Generator[WorkflowMessage, None, dict]:
         """
-        批量执行部署工作流
+        串行执行部署工作流（原有逻辑）
         
         Args:
             tools: 工具列表（如果为空，从 list.md 读取）
@@ -604,9 +710,151 @@ class BatchDeploymentWorkflow:
             "failed": failed_count,
             "skipped": skipped_count
         }
+    
+    def run_concurrent(
+        self,
+        tools: list[Tool] = None,
+        limit: int = None,
+        skip_verification: bool = False,
+        filter_domain: str = None
+    ) -> Generator[WorkflowMessage, None, dict]:
+        """
+        并发执行部署工作流（使用多进程）
+        
+        Args:
+            tools: 工具列表（如果为空，从 list.md 读取）
+            limit: 限制处理数量
+            skip_verification: 是否跳过验证
+            filter_domain: 按领域过滤
+        
+        Yields:
+            WorkflowMessage: 工作流进度消息
+            
+        Returns:
+            dict: 统计结果
+        """
+        # 读取工具列表
+        if tools is None:
+            tools = parse_list_md()
+        
+        # 过滤
+        if filter_domain:
+            tools = [t for t in tools if filter_domain.lower() in t.domain.lower()]
+        
+        # 限制数量
+        if limit:
+            tools = tools[:limit]
+        
+        total = len(tools)
+        success_count = 0
+        failed_count = 0
+        skipped_count = 0
+        completed_count = 0
+        
+        yield WorkflowMessage(
+            content=f"📋 开始并发处理 {total} 个工具（最大并发数: {self.max_workers}）...",
+            level="info"
+        )
+        
+        # 使用 ProcessPoolExecutor 并发执行
+        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+            # 提交所有任务
+            future_to_tool = {
+                executor.submit(_run_single_tool_worker, tool, skip_verification): tool
+                for tool in tools
+            }
+            
+            # 处理完成的任务
+            for future in as_completed(future_to_tool):
+                tool = future_to_tool[future]
+                completed_count += 1
+                
+                try:
+                    result = future.result()
+                    
+                    # 输出该工具的所有消息
+                    yield WorkflowMessage(
+                        content=f"\n{'='*50}\n[{completed_count}/{total}] {tool.name} 完成\n{'='*50}",
+                        level="info"
+                    )
+                    
+                    for msg in result.get("messages", []):
+                        yield WorkflowMessage(
+                            content=msg["content"],
+                            level=msg["level"]
+                        )
+                    
+                    # 统计结果
+                    status = result.get("status", "failed")
+                    if status == "success":
+                        success_count += 1
+                    elif status == "skipped":
+                        skipped_count += 1
+                    else:
+                        failed_count += 1
+                        
+                except Exception as e:
+                    failed_count += 1
+                    yield WorkflowMessage(
+                        content=f"❌ 处理 {tool.name} 时发生异常: {str(e)}",
+                        level="error"
+                    )
+        
+        # 最终汇总
+        yield WorkflowMessage(
+            content=f"\n{'='*50}\n"
+                    f"📊 并发处理完成\n"
+                    f"总计: {total}\n"
+                    f"成功: {success_count}\n"
+                    f"失败: {failed_count}\n"
+                    f"跳过: {skipped_count}\n"
+                    f"{'='*50}",
+            level="info"
+        )
+        
+        return {
+            "total": total,
+            "success": success_count,
+            "failed": failed_count,
+            "skipped": skipped_count
+        }
 
 
 # 便捷函数
+def deploy_batch_tools(
+    limit: int = None,
+    skip_verification: bool = False,
+    filter_domain: str = None,
+    concurrent: bool = False,
+    max_workers: int = MAX_CONCURRENT_TOOLS
+) -> dict:
+    """
+    批量部署工具的便捷函数
+    
+    Args:
+        limit: 限制处理数量
+        skip_verification: 是否跳过验证
+        filter_domain: 按领域过滤
+        concurrent: 是否使用并发模式
+        max_workers: 最大并发工作进程数
+    
+    Returns:
+        dict: 统计结果
+    """
+    workflow = BatchDeploymentWorkflow(max_workers=max_workers)
+    
+    # 运行工作流并打印消息
+    for msg in workflow.run(
+        limit=limit,
+        skip_verification=skip_verification,
+        filter_domain=filter_domain,
+        concurrent=concurrent
+    ):
+        print(msg.content)
+    
+    return workflow
+
+
 def deploy_single_tool(
     tool_name: str = None,
     repo_url: str = None,
