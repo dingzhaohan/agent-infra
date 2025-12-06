@@ -271,8 +271,8 @@ def create_verifier_agent() -> Agent:
             "- 如果失败，提供详细的错误分析和修复建议",
             "- 如果成功，确认服务状态和访问方式",
         ],
-        show_tool_calls=True,
         markdown=True,
+        debug_mode=True,  # 显示调试信息
     )
 
 

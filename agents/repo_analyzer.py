@@ -190,8 +190,8 @@ def create_repo_analyzer_agent() -> Agent:
             "- 推荐的部署策略",
             "- 需要注意的特殊配置或依赖",
         ],
-        show_tool_calls=True,
         markdown=True,
+        debug_mode=True,  # 显示调试信息
     )
 
 

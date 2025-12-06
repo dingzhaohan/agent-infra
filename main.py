@@ -52,7 +52,7 @@ def print_banner():
     console.print(banner, style="bold blue")
 
 
-def check_prerequisites():
+def check_prerequisites(skip_docker: bool = False):
     """检查前置条件"""
     issues = []
     
@@ -60,16 +60,18 @@ def check_prerequisites():
     if not OPENAI_API_KEY:
         issues.append("未设置 OPENAI_API_KEY 环境变量")
     
-    # 检查 Docker
-    import subprocess
-    try:
-        result = subprocess.run(["docker", "info"], capture_output=True)
-        if result.returncode != 0:
-            issues.append("Docker 未运行或无法访问")
-    except FileNotFoundError:
-        issues.append("Docker 未安装")
+    # 检查 Docker（如果不跳过验证）
+    if not skip_docker:
+        import subprocess
+        try:
+            result = subprocess.run(["docker", "info"], capture_output=True)
+            if result.returncode != 0:
+                issues.append("Docker 未运行或无法访问")
+        except FileNotFoundError:
+            issues.append("Docker 未安装")
     
     # 检查 Git
+    import subprocess
     try:
         result = subprocess.run(["git", "--version"], capture_output=True)
         if result.returncode != 0:
@@ -288,8 +290,8 @@ def main():
         interactive_mode()
         return
     
-    # 检查前置条件
-    issues = check_prerequisites()
+    # 检查前置条件（如果跳过验证则不检查 Docker）
+    issues = check_prerequisites(skip_docker=args.skip_verify)
     if issues:
         console.print("[bold red]⚠️ 前置条件检查失败:[/bold red]")
         for issue in issues:

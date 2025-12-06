@@ -360,8 +360,8 @@ def create_dockerfile_generator_agent() -> Agent:
             "- 合适的入口点配置",
             "- 必要的环境变量",
         ],
-        show_tool_calls=True,
         markdown=True,
+        debug_mode=True,  # 显示调试信息
     )
 
 

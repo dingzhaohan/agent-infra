@@ -1,26 +1,24 @@
 """
 主工作流 - 编排仓库分析、Dockerfile 生成和验证的完整流程
-基于 Agno Workflow 框架
+使用纯 Python 类实现，不依赖 Agno Workflow API（更稳定）
 """
-import asyncio
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Iterator
+from typing import Optional, Generator, Callable
 from enum import Enum
-from dataclasses import dataclass, field
-from pydantic import BaseModel
+from dataclasses import dataclass
 
-from agno.workflow import Workflow, RunResponse, RunEvent
-from agno.agent import Agent
-from agno.models.openai import OpenAIChat
-from agno.utils.log import logger
-
-from config import REPOS_DIR, RESULTS_DIR, OPENAI_MODEL, MAX_RETRIES
+from config import REPOS_DIR, RESULTS_DIR, MAX_RETRIES
 from utils.list_parser import Tool, parse_list_md
 from agents.repo_analyzer import create_repo_analyzer_agent
 from agents.dockerfile_generator import create_dockerfile_generator_agent
 from agents.verifier import create_verifier_agent
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class DeploymentStatus(str, Enum):
@@ -34,6 +32,16 @@ class DeploymentStatus(str, Enum):
     SUCCESS = "success"
     FAILED = "failed"
     SKIPPED = "skipped"
+
+
+@dataclass
+class WorkflowMessage:
+    """工作流消息"""
+    content: str
+    level: str = "info"  # info, warning, error, success
+    
+    def __str__(self):
+        return self.content
 
 
 @dataclass
@@ -71,7 +79,7 @@ class DeploymentResult:
         }
 
 
-class RepoDeploymentWorkflow(Workflow):
+class RepoDeploymentWorkflow:
     """
     开源仓库部署工作流
     
@@ -83,26 +91,27 @@ class RepoDeploymentWorkflow(Workflow):
     5. 记录结果
     """
     
-    description: str = "自动化部署开源科学工具的工作流"
+    def __init__(self):
+        """初始化工作流和 Agents"""
+        self.analyzer_agent = None
+        self.generator_agent = None
+        self.verifier_agent = None
+        self._agents_initialized = False
     
-    # Agents
-    analyzer_agent: Agent = None
-    generator_agent: Agent = None
-    verifier_agent: Agent = None
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # 初始化 Agents
-        self.analyzer_agent = create_repo_analyzer_agent()
-        self.generator_agent = create_dockerfile_generator_agent()
-        self.verifier_agent = create_verifier_agent()
+    def _init_agents(self):
+        """延迟初始化 Agents（避免启动时加载）"""
+        if not self._agents_initialized:
+            self.analyzer_agent = create_repo_analyzer_agent()
+            self.generator_agent = create_dockerfile_generator_agent()
+            self.verifier_agent = create_verifier_agent()
+            self._agents_initialized = True
     
     def run(
         self,
         tool: Tool,
         max_retries: int = MAX_RETRIES,
         skip_verification: bool = False
-    ) -> Iterator[RunResponse]:
+    ) -> Generator[WorkflowMessage, None, DeploymentResult]:
         """
         执行单个工具的部署工作流
         
@@ -112,8 +121,14 @@ class RepoDeploymentWorkflow(Workflow):
             skip_verification: 是否跳过验证步骤
         
         Yields:
-            RunResponse: 工作流响应
+            WorkflowMessage: 工作流进度消息
+            
+        Returns:
+            DeploymentResult: 部署结果
         """
+        # 初始化 Agents
+        self._init_agents()
+        
         result = DeploymentResult(
             tool_name=tool.name,
             repo_url=tool.homepage,
@@ -124,29 +139,32 @@ class RepoDeploymentWorkflow(Workflow):
         
         try:
             # 阶段 1: 仓库分析
-            yield from self._analyze_repo(tool, result)
+            for msg in self._analyze_repo(tool, result):
+                yield msg
             
             if result.status == DeploymentStatus.FAILED:
-                yield RunResponse(
+                yield WorkflowMessage(
                     content=f"❌ 分析失败: {result.error_message}",
-                    event=RunEvent.workflow_completed
+                    level="error"
                 )
-                return
+                return result
             
             # 阶段 2: Dockerfile 生成（如果需要）
             if not result.has_existing_dockerfile:
-                yield from self._generate_dockerfile(tool, result)
+                for msg in self._generate_dockerfile(tool, result):
+                    yield msg
                 
                 if result.status == DeploymentStatus.FAILED:
-                    yield RunResponse(
+                    yield WorkflowMessage(
                         content=f"❌ Dockerfile 生成失败: {result.error_message}",
-                        event=RunEvent.workflow_completed
+                        level="error"
                     )
-                    return
+                    return result
             
             # 阶段 3: 构建和验证
             if not skip_verification:
-                yield from self._verify_deployment(tool, result, max_retries)
+                for msg in self._verify_deployment(tool, result, max_retries):
+                    yield msg
             else:
                 result.status = DeploymentStatus.SKIPPED
                 result.verification_notes = "跳过验证步骤"
@@ -158,23 +176,23 @@ class RepoDeploymentWorkflow(Workflow):
             
             # 最终输出
             if result.status == DeploymentStatus.SUCCESS:
-                yield RunResponse(
+                yield WorkflowMessage(
                     content=f"✅ 工具 {tool.name} 部署成功!\n"
                             f"镜像: {result.image_name}\n"
                             f"Dockerfile: {result.dockerfile_path}",
-                    event=RunEvent.workflow_completed
+                    level="success"
                 )
             elif result.status == DeploymentStatus.SKIPPED:
-                yield RunResponse(
+                yield WorkflowMessage(
                     content=f"⏭️ 工具 {tool.name} 分析完成（跳过验证）\n"
                             f"Dockerfile: {result.dockerfile_path}",
-                    event=RunEvent.workflow_completed
+                    level="info"
                 )
             else:
-                yield RunResponse(
+                yield WorkflowMessage(
                     content=f"❌ 工具 {tool.name} 部署失败\n"
                             f"错误: {result.error_message}",
-                    event=RunEvent.workflow_completed
+                    level="error"
                 )
                 
         except Exception as e:
@@ -183,23 +201,28 @@ class RepoDeploymentWorkflow(Workflow):
             result.completed_at = datetime.now()
             self._save_result(result)
             
-            yield RunResponse(
+            yield WorkflowMessage(
                 content=f"❌ 工作流异常: {str(e)}",
-                event=RunEvent.workflow_completed
+                level="error"
             )
+        
+        return result
     
     def _analyze_repo(
         self,
         tool: Tool,
         result: DeploymentResult
-    ) -> Iterator[RunResponse]:
+    ) -> Generator[WorkflowMessage, None, None]:
         """分析仓库阶段"""
         result.status = DeploymentStatus.ANALYZING
         
-        yield RunResponse(
+        yield WorkflowMessage(
             content=f"🔍 正在分析仓库: {tool.name} ({tool.homepage})",
-            event=RunEvent.run_response
+            level="info"
         )
+        
+        # 设置本地路径
+        result.local_path = str(REPOS_DIR / tool.repo_name)
         
         # 构建分析提示
         analysis_prompt = f"""
@@ -224,10 +247,28 @@ class RepoDeploymentWorkflow(Workflow):
 """
         
         # 运行分析 Agent
-        response = self.analyzer_agent.run(analysis_prompt)
+        try:
+            response = self.analyzer_agent.run(analysis_prompt)
+            logger.info(f"分析 Agent 响应完成")
+        except Exception as e:
+            result.status = DeploymentStatus.FAILED
+            result.error_message = f"分析 Agent 错误: {str(e)}"
+            yield WorkflowMessage(
+                content=f"❌ 分析 Agent 错误: {str(e)}",
+                level="error"
+            )
+            return
         
-        # 解析分析结果
-        result.local_path = str(REPOS_DIR / tool.repo_name)
+        # 验证仓库是否成功克隆
+        repo_path = Path(result.local_path)
+        if not repo_path.exists():
+            result.status = DeploymentStatus.FAILED
+            result.error_message = f"仓库克隆失败，路径不存在: {result.local_path}"
+            yield WorkflowMessage(
+                content=f"❌ 仓库克隆失败: {result.local_path}",
+                level="error"
+            )
+            return
         
         # 检查是否找到 Dockerfile
         from tools.file_tools import find_dockerfile
@@ -237,29 +278,37 @@ class RepoDeploymentWorkflow(Workflow):
             result.has_existing_dockerfile = True
             result.dockerfile_path = dockerfile_result["primary_dockerfile"]
             result.analysis_notes = f"找到现有 Dockerfile: {result.dockerfile_path}"
+            
+            # 验证 Dockerfile 文件确实存在
+            if not Path(result.dockerfile_path).exists():
+                logger.warning(f"Dockerfile 路径无效: {result.dockerfile_path}")
+                result.has_existing_dockerfile = False
+                result.dockerfile_path = ""
+                result.analysis_notes = "Dockerfile 路径无效，需要生成"
         else:
             result.has_existing_dockerfile = False
+            result.dockerfile_path = ""
             result.analysis_notes = "未找到 Dockerfile，需要生成"
         
-        yield RunResponse(
+        yield WorkflowMessage(
             content=f"📋 分析完成\n"
                     f"本地路径: {result.local_path}\n"
                     f"现有 Dockerfile: {'是' if result.has_existing_dockerfile else '否'}\n"
                     f"{result.analysis_notes}",
-            event=RunEvent.run_response
+            level="info"
         )
     
     def _generate_dockerfile(
         self,
         tool: Tool,
         result: DeploymentResult
-    ) -> Iterator[RunResponse]:
+    ) -> Generator[WorkflowMessage, None, None]:
         """生成 Dockerfile 阶段"""
         result.status = DeploymentStatus.GENERATING
         
-        yield RunResponse(
+        yield WorkflowMessage(
             content=f"📝 正在为 {tool.name} 生成 Dockerfile...",
-            event=RunEvent.run_response
+            level="info"
         )
         
         # 获取依赖信息
@@ -267,6 +316,9 @@ class RepoDeploymentWorkflow(Workflow):
         
         dep_info = find_dependency_files(result.local_path)
         readme_info = find_readme(result.local_path)
+        
+        # 预期的 Dockerfile 路径
+        expected_dockerfile_path = Path(result.local_path) / "Dockerfile.generated"
         
         # 构建生成提示
         generation_prompt = f"""
@@ -285,33 +337,63 @@ class RepoDeploymentWorkflow(Workflow):
 1. 选择合适的 Dockerfile 模板
 2. 根据项目特点自定义配置
 3. 添加必要的系统依赖（特别是科学计算相关的）
-4. 生成完整的 Dockerfile 并保存到仓库目录
+4. 生成完整的 Dockerfile 并保存到仓库目录（文件名：Dockerfile.generated）
 
 如果是科学计算工具，请特别注意：
 - 可能需要 BLAS/LAPACK 库
 - 可能需要 Fortran 编译器
 - 可能需要 HDF5 支持
 - 可能需要 MPI 并行支持
+
+**重要**: 请使用 save_dockerfile 工具将生成的 Dockerfile 保存到 {result.local_path}
 """
         
         # 运行生成 Agent
-        response = self.generator_agent.run(generation_prompt)
+        try:
+            response = self.generator_agent.run(generation_prompt)
+            logger.info(f"生成 Agent 响应完成")
+        except Exception as e:
+            result.status = DeploymentStatus.FAILED
+            result.error_message = f"生成 Agent 错误: {str(e)}"
+            yield WorkflowMessage(
+                content=f"❌ 生成 Agent 错误: {str(e)}",
+                level="error"
+            )
+            return
         
-        # 更新结果
-        result.dockerfile_path = str(Path(result.local_path) / "Dockerfile.generated")
-        result.generation_notes = "Dockerfile 已生成"
-        
-        yield RunResponse(
-            content=f"✅ Dockerfile 已生成: {result.dockerfile_path}",
-            event=RunEvent.run_response
-        )
+        # 验证 Dockerfile 是否成功生成
+        if expected_dockerfile_path.exists():
+            result.dockerfile_path = str(expected_dockerfile_path)
+            result.generation_notes = "Dockerfile 已生成"
+            yield WorkflowMessage(
+                content=f"✅ Dockerfile 已生成: {result.dockerfile_path}",
+                level="success"
+            )
+        else:
+            # 检查是否有其他名称的生成文件
+            generated_files = list(Path(result.local_path).glob("Dockerfile*"))
+            if generated_files:
+                # 使用找到的第一个 Dockerfile
+                result.dockerfile_path = str(generated_files[0])
+                result.generation_notes = f"使用已有 Dockerfile: {result.dockerfile_path}"
+                yield WorkflowMessage(
+                    content=f"📄 使用已有 Dockerfile: {result.dockerfile_path}",
+                    level="info"
+                )
+            else:
+                result.status = DeploymentStatus.FAILED
+                result.error_message = "Dockerfile 生成失败，文件未创建"
+                yield WorkflowMessage(
+                    content=f"❌ Dockerfile 生成失败: 文件未创建",
+                    level="error"
+                )
     
     def _verify_deployment(
         self,
         tool: Tool,
         result: DeploymentResult,
         max_retries: int
-    ) -> Iterator[RunResponse]:
+    ) -> Generator[WorkflowMessage, None, None]:
         """验证部署阶段"""
         result.status = DeploymentStatus.BUILDING
         
@@ -319,9 +401,9 @@ class RepoDeploymentWorkflow(Workflow):
         image_name = f"scitools/{tool.repo_name}".lower().replace(' ', '-')
         result.image_name = image_name
         
-        yield RunResponse(
+        yield WorkflowMessage(
             content=f"🔨 正在构建镜像: {image_name}...",
-            event=RunEvent.run_response
+            level="info"
         )
         
         for attempt in range(max_retries):
@@ -347,10 +429,19 @@ class RepoDeploymentWorkflow(Workflow):
 """
             
             # 运行验证 Agent
-            response = self.verifier_agent.run(verification_prompt)
+            try:
+                response = self.verifier_agent.run(verification_prompt)
+            except Exception as e:
+                result.verification_notes = f"验证 Agent 错误: {str(e)}"
+                if attempt < max_retries - 1:
+                    yield WorkflowMessage(
+                        content=f"⚠️ 第 {attempt + 1} 次尝试失败，正在重试...\n原因: {result.verification_notes}",
+                        level="warning"
+                    )
+                continue
             
             # 检查结果（简化的检查逻辑）
-            from tools.docker_tools import build_docker_image, run_docker_container, check_container_status
+            from tools.docker_tools import build_docker_image, run_docker_container
             
             build_result = build_docker_image(
                 dockerfile_path=result.dockerfile_path,
@@ -372,9 +463,9 @@ class RepoDeploymentWorkflow(Workflow):
                     result.status = DeploymentStatus.SUCCESS
                     result.verification_notes = "构建和运行验证成功"
                     
-                    yield RunResponse(
+                    yield WorkflowMessage(
                         content=f"✅ 验证成功！镜像 {image_name} 已构建并运行",
-                        event=RunEvent.run_response
+                        level="success"
                     )
                     return
                 else:
@@ -383,19 +474,18 @@ class RepoDeploymentWorkflow(Workflow):
                 result.verification_notes = f"构建失败: {build_result.get('error', '')}"
             
             if attempt < max_retries - 1:
-                yield RunResponse(
-                    content=f"⚠️ 第 {attempt + 1} 次尝试失败，正在重试...\n"
-                            f"原因: {result.verification_notes}",
-                    event=RunEvent.run_response
+                yield WorkflowMessage(
+                    content=f"⚠️ 第 {attempt + 1} 次尝试失败，正在重试...\n原因: {result.verification_notes}",
+                    level="warning"
                 )
         
         # 所有重试都失败
         result.status = DeploymentStatus.FAILED
         result.error_message = f"验证失败（尝试 {max_retries} 次）: {result.verification_notes}"
         
-        yield RunResponse(
+        yield WorkflowMessage(
             content=f"❌ 验证失败: {result.error_message}",
-            event=RunEvent.run_response
+            level="error"
         )
     
     def _save_result(self, result: DeploymentResult):
@@ -408,19 +498,14 @@ class RepoDeploymentWorkflow(Workflow):
         logger.info(f"结果已保存: {result_file}")
 
 
-class BatchDeploymentWorkflow(Workflow):
+class BatchDeploymentWorkflow:
     """
     批量部署工作流
     
     处理 list.md 中的多个工具
     """
     
-    description: str = "批量部署开源科学工具的工作流"
-    
-    single_workflow: RepoDeploymentWorkflow = None
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self):
         self.single_workflow = RepoDeploymentWorkflow()
     
     def run(
@@ -429,7 +514,7 @@ class BatchDeploymentWorkflow(Workflow):
         limit: int = None,
         skip_verification: bool = False,
         filter_domain: str = None
-    ) -> Iterator[RunResponse]:
+    ) -> Generator[WorkflowMessage, None, dict]:
         """
         批量执行部署工作流
         
@@ -440,7 +525,10 @@ class BatchDeploymentWorkflow(Workflow):
             filter_domain: 按领域过滤
         
         Yields:
-            RunResponse: 工作流响应
+            WorkflowMessage: 工作流进度消息
+            
+        Returns:
+            dict: 统计结果
         """
         # 读取工具列表
         if tools is None:
@@ -459,26 +547,24 @@ class BatchDeploymentWorkflow(Workflow):
         failed_count = 0
         skipped_count = 0
         
-        yield RunResponse(
+        yield WorkflowMessage(
             content=f"📋 开始批量处理 {total} 个工具...",
-            event=RunEvent.run_response
+            level="info"
         )
         
         for i, tool in enumerate(tools, 1):
-            yield RunResponse(
-                content=f"\n{'='*50}\n"
-                        f"[{i}/{total}] 处理: {tool.name}\n"
-                        f"{'='*50}",
-                event=RunEvent.run_response
+            yield WorkflowMessage(
+                content=f"\n{'='*50}\n[{i}/{total}] 处理: {tool.name}\n{'='*50}",
+                level="info"
             )
             
             try:
                 # 运行单个工具的工作流
-                for response in self.single_workflow.run(
+                for msg in self.single_workflow.run(
                     tool=tool,
                     skip_verification=skip_verification
                 ):
-                    yield response
+                    yield msg
                 
                 # 统计结果
                 result_file = RESULTS_DIR / f"{tool.name.replace('/', '_')}.json"
@@ -495,13 +581,13 @@ class BatchDeploymentWorkflow(Workflow):
                         
             except Exception as e:
                 failed_count += 1
-                yield RunResponse(
+                yield WorkflowMessage(
                     content=f"❌ 处理 {tool.name} 时发生异常: {str(e)}",
-                    event=RunEvent.run_response
+                    level="error"
                 )
         
         # 最终汇总
-        yield RunResponse(
+        yield WorkflowMessage(
             content=f"\n{'='*50}\n"
                     f"📊 批量处理完成\n"
                     f"总计: {total}\n"
@@ -509,8 +595,15 @@ class BatchDeploymentWorkflow(Workflow):
                     f"失败: {failed_count}\n"
                     f"跳过: {skipped_count}\n"
                     f"{'='*50}",
-            event=RunEvent.workflow_completed
+            level="info"
         )
+        
+        return {
+            "total": total,
+            "success": success_count,
+            "failed": failed_count,
+            "skipped": skipped_count
+        }
 
 
 # 便捷函数
@@ -518,7 +611,7 @@ def deploy_single_tool(
     tool_name: str = None,
     repo_url: str = None,
     skip_verification: bool = False
-) -> DeploymentResult:
+) -> dict:
     """
     部署单个工具的便捷函数
     
@@ -528,7 +621,7 @@ def deploy_single_tool(
         skip_verification: 是否跳过验证
     
     Returns:
-        DeploymentResult: 部署结果
+        dict: 部署结果
     """
     if tool_name:
         tools = parse_list_md()
@@ -549,8 +642,9 @@ def deploy_single_tool(
     
     workflow = RepoDeploymentWorkflow()
     
-    for response in workflow.run(tool=tool, skip_verification=skip_verification):
-        print(response.content)
+    # 运行工作流并打印消息
+    for msg in workflow.run(tool=tool, skip_verification=skip_verification):
+        print(msg.content)
     
     # 读取结果
     result_file = RESULTS_DIR / f"{tool.name.replace('/', '_')}.json"
@@ -559,4 +653,3 @@ def deploy_single_tool(
             return json.load(f)
     
     return None
-

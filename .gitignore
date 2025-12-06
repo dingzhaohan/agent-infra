@@ -2,3 +2,5 @@
 results/
 logs/
 repos/
+
+*.pyc
