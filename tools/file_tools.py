@@ -39,9 +39,19 @@ def find_dockerfile(repo_path: str) -> dict:
     # 确定主 Dockerfile（优先根目录）
     primary = None
     if all_dockerfiles:
-        # 按路径长度排序，优先选择根目录的
-        all_dockerfiles.sort(key=lambda x: len(x))
-        primary = all_dockerfiles[0]
+        repo_path_obj = Path(repo_path).resolve()
+        
+        # 1. 优先根目录的 Dockerfile
+        root_dockerfiles = [
+            f for f in all_dockerfiles 
+            if Path(f).parent.resolve() == repo_path_obj
+        ]
+        if root_dockerfiles:
+            primary = root_dockerfiles[0]
+        else:
+            # 2. 如果没有根目录的，按路径长度排序（最短的优先）
+            all_dockerfiles.sort(key=lambda x: len(x))
+            primary = all_dockerfiles[0]
     
     return {
         "found": len(all_dockerfiles) > 0,
@@ -228,6 +238,52 @@ def find_ci_cd_files(repo_path: str) -> dict:
     }
 
 
+def _improve_git_clone_in_dockerfile(content: str) -> str:
+    """
+    自动改进 Dockerfile 中的 git clone 命令
+    添加 GIT_TERMINAL_PROMPT=0 环境变量
+    
+    Args:
+        content: Dockerfile 内容
+    
+    Returns:
+        改进后的 Dockerfile 内容
+    """
+    # 检查是否包含 git clone 命令
+    if 'git clone' not in content:
+        return content
+    
+    # 检查是否已经设置了 GIT_TERMINAL_PROMPT
+    if 'GIT_TERMINAL_PROMPT' in content:
+        return content
+    
+    # 在第一个 FROM 之后添加 ENV GIT_TERMINAL_PROMPT=0
+    lines = content.split('\n')
+    improved_lines = []
+    env_added = False
+    
+    for i, line in enumerate(lines):
+        improved_lines.append(line)
+        
+        # 在第一个 FROM 之后添加 ENV（如果还没有添加）
+        if not env_added and line.strip().startswith('FROM'):
+            # 检查下一行是否是注释或空行
+            next_non_empty = i + 1
+            while next_non_empty < len(lines) and (not lines[next_non_empty].strip() or lines[next_non_empty].strip().startswith('#')):
+                next_non_empty += 1
+            
+            # 在 FROM 之后添加 ENV
+            if next_non_empty < len(lines):
+                improved_lines.append('ENV GIT_TERMINAL_PROMPT=0')
+                env_added = True
+    
+    # 如果没找到 FROM，在开头添加
+    if not env_added:
+        improved_lines.insert(0, 'ENV GIT_TERMINAL_PROMPT=0')
+    
+    return '\n'.join(improved_lines)
+
+
 def write_dockerfile(
     repo_path: str,
     dockerfile_content: str,
@@ -235,6 +291,7 @@ def write_dockerfile(
 ) -> dict:
     """
     写入 Dockerfile 到仓库
+    自动改进 git clone 命令（添加 GIT_TERMINAL_PROMPT=0）
     
     Args:
         repo_path: 仓库路径
@@ -245,10 +302,13 @@ def write_dockerfile(
         dict: 包含 success, path, error
     """
     try:
+        # 自动改进 git clone 命令
+        improved_content = _improve_git_clone_in_dockerfile(dockerfile_content)
+        
         dockerfile_path = Path(repo_path) / filename
         
         with open(dockerfile_path, 'w', encoding='utf-8') as f:
-            f.write(dockerfile_content)
+            f.write(improved_content)
         
         return {
             "success": True,

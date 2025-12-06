@@ -370,7 +370,219 @@ RUN echo "source /opt/intel/oneapi/setvars.sh" >> ~/.bashrc && \\
 # 默认使用 bash（会自动加载 Intel 环境）
 CMD ["/bin/bash", "-l"]
 ''',
+    
+    # CMake 元仓库模板（用于 SuiteSparse 等）
+    'cmake_metapackage': '''
+# Dockerfile for CMake meta-package (e.g., SuiteSparse)
+# Meta-package: repository containing multiple sub-packages built together
+# Build approach: use root-level CMakeLists.txt to build entire suite
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \\
+    GIT_TERMINAL_PROMPT=0
+SHELL ["/bin/bash", "-c"]
+
+# Install complete scientific computing toolchain
+# Includes: C/C++/Fortran compilers, build tools, MPI, BLAS/LAPACK, HDF5, etc.
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    bash ca-certificates curl wget git \\
+    # Core build toolchain
+    build-essential gcc g++ gfortran make cmake pkg-config autoconf automake libtool \\
+    # MPI (OpenMPI)
+    openmpi-bin libopenmpi-dev \\
+    # Linear algebra and numerics
+    libopenblas-dev liblapack-dev \\
+    # HDF5 with MPI support
+    libhdf5-openmpi-dev hdf5-tools \\
+    # Additional scientific libraries
+    libfftw3-dev libmetis-dev \\
+    # Utilities
+    vim tree htop ncdu \\
+    && rm -rf /var/lib/apt/lists/*
+
+# Set MPI environment variables
+ENV MPICC=mpicc \\
+    MPICXX=mpicxx \\
+    MPIFORT=mpifort \\
+    MPI_HOME=/usr/lib/x86_64-linux-gnu/openmpi
+
+# Copy entire repository (meta-package with all sub-packages)
+WORKDIR /src/metapackage
+COPY . /src/metapackage
+
+# Build entire meta-package using CMake
+# Strategy:
+# 1. Create out-of-source build directory
+# 2. Configure with cmake (auto-detects all sub-packages)
+# 3. Build with all available cores
+# 4. Install to /usr/local
+# 5. Update library cache
+RUN set -eux; \\
+    mkdir -p build && cd build && \\
+    cmake .. \\
+        -DCMAKE_BUILD_TYPE=Release \\
+        -DCMAKE_INSTALL_PREFIX=/usr/local \\
+        -DBUILD_SHARED_LIBS=ON \\
+        -DBUILD_STATIC_LIBS=OFF && \\
+    cmake --build . -j"$(nproc)" && \\
+    cmake --install . && \\
+    ldconfig
+
+# Create non-root user for safer operation
+ARG USERNAME=appuser
+ARG USER_UID=1000
+ARG USER_GID=1000
+RUN groupadd --gid ${USER_GID} ${USERNAME} && \\
+    useradd --uid ${USER_UID} --gid ${USER_GID} -m -s /bin/bash ${USERNAME}
+
+# Set library and pkg-config paths
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/pkgconfig \\
+    LD_LIBRARY_PATH=/usr/local/lib:/usr/lib:/usr/lib/x86_64-linux-gnu
+
+WORKDIR /workspace
+USER ${USERNAME}
+
+# Default to interactive bash shell
+CMD ["/bin/bash"]
+''',
 }
+
+
+@tool
+def check_if_metapackage(repo_path: str) -> str:
+    """
+    通用的元仓库检测（不依赖硬编码的包名）
+    
+    元仓库特征：
+    1. 根目录有 CMakeLists.txt 或 Makefile
+    2. 包含多个子目录，每个都有自己的构建文件
+    3. 根目录的构建文件引用这些子目录
+    
+    Args:
+        repo_path: 仓库路径
+    
+    Returns:
+        检查结果的 JSON 字符串
+    """
+    from pathlib import Path
+    import re
+    
+    repo_path_obj = Path(repo_path).resolve()
+    
+    # 1. 检查根目录构建文件
+    root_cmake_path = repo_path_obj / "CMakeLists.txt"
+    root_makefile_path = repo_path_obj / "Makefile"
+    
+    has_root_cmake = root_cmake_path.exists()
+    has_root_makefile = root_makefile_path.exists()
+    
+    if not (has_root_cmake or has_root_makefile):
+        return json.dumps({
+            "is_metapackage": False,
+            "reason": "根目录没有构建文件"
+        }, ensure_ascii=False, indent=2)
+    
+    # 2. 扫描所有一级子目录，查找有构建文件的子包
+    subpackages_with_cmake = []
+    subpackages_with_makefile = []
+    
+    try:
+        for item in repo_path_obj.iterdir():
+            if not item.is_dir():
+                continue
+            
+            # 跳过常见的非子包目录
+            skip_dirs = {
+                '.git', '.github', '.gitlab', '.vscode', '.idea',
+                'build', 'builds', '_build', 'cmake-build-debug', 'cmake-build-release',
+                'dist', 'out', 'output', 'bin', 'lib', 'include',
+                'docs', 'doc', 'documentation', 'examples', 'tests', 'test',
+                'node_modules', 'venv', '.venv', 'env', '__pycache__',
+                'target', '.mvn', '.gradle'
+            }
+            
+            if item.name.lower() in skip_dirs or item.name.startswith('.'):
+                continue
+            
+            # 检查是否有 CMakeLists.txt
+            if (item / "CMakeLists.txt").exists():
+                subpackages_with_cmake.append(item.name)
+            
+            # 检查是否有 Makefile
+            if (item / "Makefile").exists():
+                subpackages_with_makefile.append(item.name)
+    except Exception as e:
+        return json.dumps({
+            "is_metapackage": False,
+            "error": f"扫描子目录失败: {str(e)}"
+        }, ensure_ascii=False, indent=2)
+    
+    # 合并有构建文件的子包列表
+    all_subpackages = sorted(set(subpackages_with_cmake + subpackages_with_makefile))
+    
+    # 3. 分析根目录的构建文件，验证是否引用子目录
+    references_subdirs = False
+    referenced_dirs = []
+    
+    if has_root_cmake:
+        try:
+            cmake_content = root_cmake_path.read_text(encoding='utf-8', errors='ignore')
+            # 查找 add_subdirectory() 命令
+            subdirs = re.findall(r'add_subdirectory\s*\(\s*([^)]+)\s*\)', cmake_content, re.IGNORECASE)
+            referenced_dirs.extend([d.strip().strip('"').strip("'") for d in subdirs])
+            if subdirs:
+                references_subdirs = True
+        except:
+            pass
+    
+    if has_root_makefile:
+        try:
+            makefile_content = root_makefile_path.read_text(encoding='utf-8', errors='ignore')
+            # 查找 cd xxx && make 或 $(MAKE) -C xxx 模式
+            cd_patterns = re.findall(r'cd\s+([^\s;&|]+)\s+&&', makefile_content)
+            make_c_patterns = re.findall(r'\$\(MAKE\)\s+-C\s+([^\s;&|]+)', makefile_content)
+            referenced_dirs.extend(cd_patterns + make_c_patterns)
+            if cd_patterns or make_c_patterns:
+                references_subdirs = True
+        except:
+            pass
+    
+    referenced_dirs = sorted(set(d.strip() for d in referenced_dirs if d.strip()))
+    
+    # 4. 判断是否是元仓库
+    # 标准：
+    # - 有根构建文件
+    # - 有多个（>= 3）子包目录有构建文件
+    # - 或者根构建文件引用了多个子目录
+    subpackage_count = len(all_subpackages)
+    referenced_count = len(referenced_dirs)
+    
+    is_meta = (
+        (has_root_cmake or has_root_makefile) and
+        (subpackage_count >= 3 or (references_subdirs and referenced_count >= 3))
+    )
+    
+    result = {
+        "is_metapackage": is_meta,
+        "has_root_cmake": has_root_cmake,
+        "has_root_makefile": has_root_makefile,
+        "subpackages_with_build_files": all_subpackages,
+        "subpackage_count": subpackage_count,
+        "references_subdirs_in_root": references_subdirs,
+        "referenced_directories": referenced_dirs[:10] if len(referenced_dirs) > 10 else referenced_dirs,  # 限制输出
+        "referenced_count": referenced_count,
+        "detection_logic": (
+            f"检测到 {subpackage_count} 个子包有构建文件，"
+            f"根构建文件引用了 {referenced_count} 个子目录"
+        ),
+        "recommendation": (
+            "使用 cmake_metapackage 模板从根目录构建所有子包" 
+            if is_meta else "使用常规模板"
+        )
+    }
+    
+    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 @tool
@@ -387,6 +599,7 @@ def get_dockerfile_template(template_name: str) -> str:
         - node_npm: Node.js npm 项目
         - rust_cargo: Rust cargo 项目
         - go_mod: Go modules 项目
+        - cmake_metapackage: CMake 元仓库（如 SuiteSparse）
         - cpp_cmake: C++ CMake 项目
         - scientific_python: 科学计算 Python 环境
         - scientific_computing_fortran: 科学计算 Fortran/C/C++ 环境（包含 MPI、HDF5）
@@ -504,6 +717,7 @@ def create_dockerfile_generator_agent() -> Agent:
         name="DockerfileGenerator",
         model=OpenAIChat(id=OPENAI_MODEL, base_url=OPENAI_API_BASE or None),
         tools=[
+            check_if_metapackage,
             get_dockerfile_template,
             save_dockerfile,
             read_existing_dockerfile,
@@ -540,6 +754,7 @@ def create_dockerfile_generator_agent() -> Agent:
             "3. **scientific_computing_intel**: Intel OneAPI 环境（包含 ifort、MKL、Intel MPI）",
             "",
             "## 模板选择策略",
+            "- **如果是元仓库（根目录有 CMakeLists.txt 且多个子包）：使用 cmake_metapackage**",
             "- 如果项目主要是 Python + 少量编译代码：使用 scientific_python",
             "- 如果项目需要从源码编译 Fortran/C/C++：使用 scientific_computing_fortran",
             "- 如果项目明确需要 Intel 编译器或性能优化：使用 scientific_computing_intel",
