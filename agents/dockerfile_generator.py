@@ -223,12 +223,18 @@ FROM python:{python_version}-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \\
     build-essential \\
     gfortran \\
+    gcc \\
+    g++ \\
+    make \\
+    cmake \\
+    pkg-config \\
     libopenblas-dev \\
     liblapack-dev \\
     libhdf5-dev \\
     libffi-dev \\
     git \\
     wget \\
+    curl \\
     bash \\
     && rm -rf /var/lib/apt/lists/*
 
@@ -251,6 +257,119 @@ COPY . .
 # 默认使用 bash，方便用户交互式使用
 CMD ["/bin/bash"]
 ''',
+    
+    "scientific_computing_fortran": '''# 科学计算环境（Fortran/C/C++）- 基于最佳实践
+FROM ubuntu:22.04
+
+# 设置非交互式安装
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装基础工具和编译器
+RUN apt-get update && \\
+    apt-get install -y --no-install-recommends \\
+    gfortran \\
+    gcc \\
+    g++ \\
+    make \\
+    cmake \\
+    pkg-config \\
+    build-essential \\
+    software-properties-common \\
+    supervisor \\
+    net-tools \\
+    openssh-server \\
+    lsb-release \\
+    curl \\
+    unzip \\
+    emacs \\
+    vim \\
+    libgomp1 \\
+    tree \\
+    zsh \\
+    wget \\
+    git \\
+    htop \\
+    ncdu \\
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 MPI 支持
+RUN apt-get update && \\
+    apt-get install -y --no-install-recommends \\
+    openmpi-bin \\
+    libopenmpi-dev \\
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装科学计算库
+RUN apt-get update && \\
+    apt-get install -y --no-install-recommends \\
+    libopenblas-dev \\
+    liblapack-dev \\
+    libhdf5-openmpi-dev \\
+    hdf5-tools \\
+    libfftw3-dev \\
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# 设置环境变量
+ENV MPI_HOME=/usr/lib/x86_64-linux-gnu/openmpi
+ENV PATH=$MPI_HOME/bin:$PATH
+ENV LD_LIBRARY_PATH=$MPI_HOME/lib:$LD_LIBRARY_PATH
+
+# 默认使用 bash
+CMD ["/bin/bash"]
+''',
+
+    "scientific_computing_intel": '''# 科学计算环境 - Intel OneAPI 工具链
+FROM ubuntu:22.04
+
+# 设置非交互式安装
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装基础工具
+RUN apt-get update && \\
+    apt-get install -y --no-install-recommends \\
+    wget \\
+    curl \\
+    build-essential \\
+    software-properties-common \\
+    supervisor \\
+    net-tools \\
+    openssh-server \\
+    lsb-release \\
+    unzip \\
+    cmake \\
+    emacs \\
+    vim \\
+    libgomp1 \\
+    tree \\
+    zsh \\
+    git \\
+    htop \\
+    ncdu \\
+    bash \\
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 Intel OneAPI BaseKit (MKL, VTune)
+RUN wget https://hpc-profiling-example.oss-cn-beijing.aliyuncs.com/software/intel/l_BaseKit_p_2022.1.2.146_offline.sh && \\
+    bash l_BaseKit_p_2022.1.2.146_offline.sh -a -s --eula accept --components intel.oneapi.lin.mkl.devel:intel.oneapi.lin.vtune && \\
+    rm -rf l_BaseKit_p_2022.1.2.146_offline.sh
+
+# 安装 Intel OneAPI HPCKit (ifort, icx, MPI)
+RUN wget https://hpc-profiling-example.oss-cn-beijing.aliyuncs.com/software/intel/l_HPCKit_p_2022.1.2.117_offline.sh && \\
+    bash l_HPCKit_p_2022.1.2.117_offline.sh -a -s --eula accept --components intel.oneapi.lin.ifort-compiler:intel.oneapi.lin.dpcpp-cpp-compiler-pro:intel.oneapi.lin.mpi.devel && \\
+    rm -rf l_HPCKit_p_2022.1.2.117_offline.sh
+
+WORKDIR /workspace
+
+# 设置环境变量
+ENV INTEL_HOME=/opt/intel/oneapi
+RUN echo "source /opt/intel/oneapi/setvars.sh" >> ~/.bashrc && \\
+    echo "ulimit -s unlimited && ulimit -m unlimited" >> ~/.bashrc
+
+# 默认使用 bash（会自动加载 Intel 环境）
+CMD ["/bin/bash", "-l"]
+''',
 }
 
 
@@ -260,7 +379,18 @@ def get_dockerfile_template(template_name: str) -> str:
     获取 Dockerfile 模板
     
     Args:
-        template_name: 模板名称 (python_pip, python_conda, node_npm, rust_cargo, go_mod, cpp_cmake, scientific_python)
+        template_name: 模板名称
+        可用模板:
+        - python_pip: Python pip 项目
+        - python_conda: Python conda 项目
+        - python_poetry: Python poetry 项目
+        - node_npm: Node.js npm 项目
+        - rust_cargo: Rust cargo 项目
+        - go_mod: Go modules 项目
+        - cpp_cmake: C++ CMake 项目
+        - scientific_python: 科学计算 Python 环境
+        - scientific_computing_fortran: 科学计算 Fortran/C/C++ 环境（包含 MPI、HDF5）
+        - scientific_computing_intel: 科学计算 Intel OneAPI 环境（包含 ifort、MKL）
     
     Returns:
         模板内容
@@ -324,6 +454,43 @@ def read_dependency_file(file_path: str) -> str:
         return f"错误: {result.get('error', '无法读取文件')}"
 
 
+@tool
+def patch_dockerfile(
+    dockerfile_path: str,
+    issue_description: str,
+    fix_instructions: str
+) -> str:
+    """
+    根据验证失败的问题修复 Dockerfile
+    
+    Args:
+        dockerfile_path: Dockerfile 路径
+        issue_description: 问题描述（如"缺少 gfortran 编译器"）
+        fix_instructions: 修复指导（如"需要添加 gfortran 到依赖安装中"）
+    
+    Returns:
+        修复结果 JSON
+    """
+    # 读取当前 Dockerfile
+    result = read_file_content(dockerfile_path)
+    if not result["success"]:
+        return json.dumps({
+            "success": False,
+            "error": f"无法读取 Dockerfile: {result.get('error')}"
+        }, ensure_ascii=False)
+    
+    current_content = result["content"]
+    
+    # 返回当前内容和修复建议，让 agent 决定如何修改
+    return json.dumps({
+        "success": True,
+        "current_content": current_content,
+        "issue": issue_description,
+        "fix_instructions": fix_instructions,
+        "message": "请分析当前 Dockerfile 并根据问题和修复指导生成新的版本，使用 save_dockerfile 保存"
+    }, ensure_ascii=False)
+
+
 def create_dockerfile_generator_agent() -> Agent:
     """
     创建 Dockerfile 生成 Agent
@@ -341,6 +508,7 @@ def create_dockerfile_generator_agent() -> Agent:
             save_dockerfile,
             read_existing_dockerfile,
             read_dependency_file,
+            patch_dockerfile,
         ],
         description="Dockerfile 生成专家，根据项目分析生成最优的 Dockerfile",
         instructions=[
@@ -354,27 +522,52 @@ def create_dockerfile_generator_agent() -> Agent:
             "5. 添加清晰的注释",
             "",
             "## 科学计算工具特殊考虑",
-            "- 可能需要 Fortran 编译器 (gfortran)",
-            "- 可能需要 BLAS/LAPACK 库",
-            "- 可能需要 HDF5 支持",
-            "- 可能需要 MPI 并行支持",
+            "**必须包含完整的编译工具链**：",
+            "- Fortran 编译器 (gfortran) - 很多科学计算代码用 Fortran 编写",
+            "- C/C++ 编译器 (gcc, g++) - 基础编译器",
+            "- make, cmake - 构建工具",
+            "- pkg-config - 包配置工具",
+            "- BLAS/LAPACK 库 - 线性代数运算",
+            "- HDF5 支持 (libhdf5-openmpi-dev, hdf5-tools) - 数据 I/O",
+            "- MPI 并行支持 (openmpi-bin, libopenmpi-dev) - 并行计算",
+            "- FFTW - 快速傅里叶变换",
             "- GPU 支持（如需要，使用 NVIDIA 基础镜像）",
+            "",
+            "## 可用的专业模板",
+            "针对科学计算工具，我们有三个专业模板：",
+            "1. **scientific_python**: Python 科学计算环境",
+            "2. **scientific_computing_fortran**: Fortran/C/C++ 科学计算环境（包含 MPI、HDF5、OpenBLAS）",
+            "3. **scientific_computing_intel**: Intel OneAPI 环境（包含 ifort、MKL、Intel MPI）",
+            "",
+            "## 模板选择策略",
+            "- 如果项目主要是 Python + 少量编译代码：使用 scientific_python",
+            "- 如果项目需要从源码编译 Fortran/C/C++：使用 scientific_computing_fortran",
+            "- 如果项目明确需要 Intel 编译器或性能优化：使用 scientific_computing_intel",
+            "- 对于 Nek5000、VASP、OpenFOAM 等计算流体力学/材料模拟工具：优先 scientific_computing_fortran 或 scientific_computing_intel",
             "",
             "## 交互性要求（重要！）",
             "**科学计算工具镜像必须支持用户交互式使用**：",
             "1. 确保安装 bash：`apt-get install -y bash` 或 `apk add bash`",
             "2. 使用 CMD 而不是 ENTRYPOINT（除非有特殊需求）",
-            "3. 默认 CMD 应设置为：`CMD [\"/bin/bash\"]`",
+            "3. 默认 CMD 应设置为：`CMD [\"/bin/bash\"]` 或 `CMD [\"/bin/bash\", \"-l\"]`（如需加载环境）",
             "4. 这样用户可以：",
             "   - 运行 `docker run -it image /bin/bash` 进入交互式 shell",
             "   - 运行 `docker exec -it container /bin/bash` 进入正在运行的容器",
             "   - 自由执行各种命令和脚本",
             "5. 避免使用限制性的 ENTRYPOINT，因为它会阻止用户覆盖启动命令",
             "",
+            "## Dockerfile 修复流程",
+            "当收到修复请求时（通过 patch_dockerfile 工具）：",
+            "1. 使用 patch_dockerfile 获取当前 Dockerfile 内容和问题描述",
+            "2. 分析问题根因（如缺少编译器、库版本不兼容等）",
+            "3. 生成修复后的完整 Dockerfile",
+            "4. 使用 save_dockerfile 保存修复后的版本",
+            "5. 在注释中说明修复了什么问题",
+            "",
             "## 输出要求",
             "生成完整、可直接使用的 Dockerfile，包含：",
             "- 基础镜像选择说明",
-            "- 系统依赖安装（包括 bash）",
+            "- 完整的系统依赖安装（包括编译工具链、bash）",
             "- 项目依赖安装",
             "- 设置 CMD [\"/bin/bash\"] 用于交互式使用",
             "- 必要的环境变量",

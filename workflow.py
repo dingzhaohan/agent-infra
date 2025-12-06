@@ -397,7 +397,7 @@ class RepoDeploymentWorkflow:
         result: DeploymentResult,
         max_retries: int
     ) -> Generator[WorkflowMessage, None, None]:
-        """验证部署阶段"""
+        """验证部署阶段（带自动修复）"""
         result.status = DeploymentStatus.BUILDING
         
         # 生成镜像名称
@@ -417,23 +417,32 @@ class RepoDeploymentWorkflow:
 请验证以下工具的 Docker 部署：
 
 **工具名称**: {tool.name}
+**领域**: {tool.domain}
 **Dockerfile 路径**: {result.dockerfile_path}
 **镜像名称**: {image_name}
 **尝试次数**: {attempt + 1}/{max_retries}
 
-请执行以下步骤：
+请执行完整的验证流程：
 1. 构建 Docker 镜像
-2. 如果构建失败，分析错误并提供修复建议
-3. 如果构建成功，尝试运行容器
-4. 检查容器状态和日志
-5. 验证服务是否正常
+2. 运行容器（使用 tail -f /dev/null 保持运行）
+3. 检查容器状态
+4. **重要：执行功能性测试**
+   - 对于科学计算工具，检查编译器和工具是否可用
+   - 测试命令：which gfortran gcc g++ make cmake mpicc mpifort
+   - 如果有特定工具路径（如 /opt/工具名），检查文件是否存在
+   - 尝试简单的功能测试
+5. **必须调用 report_verification_result 报告最终结果**
 
-如果遇到错误，请详细分析原因。
+**特别注意**：
+- 如果镜像构建成功但缺少关键工具（如 gfortran、gcc、make），必须报告为失败
+- 必须明确列出所有缺失的依赖
+- 提供具体的修复建议
 """
             
             # 运行验证 Agent
             try:
                 response = self.verifier_agent.run(verification_prompt)
+                logger.info(f"验证 Agent 响应完成")
             except Exception as e:
                 result.verification_notes = f"验证 Agent 错误: {str(e)}"
                 if attempt < max_retries - 1:
@@ -443,44 +452,137 @@ class RepoDeploymentWorkflow:
                     )
                 continue
             
-            # 检查结果（简化的检查逻辑）
-            from tools.docker_tools import build_docker_image, run_docker_container
+            # 读取验证结果
+            import tempfile
+            import os
+            temp_file = os.path.join(tempfile.gettempdir(), "verifier_result.json")
+            verification_result = None
             
-            build_result = build_docker_image(
-                dockerfile_path=result.dockerfile_path,
-                image_name=image_name
-            )
+            if os.path.exists(temp_file):
+                try:
+                    with open(temp_file, 'r') as f:
+                        verification_result = json.load(f)
+                    os.remove(temp_file)  # 清理临时文件
+                except Exception as e:
+                    logger.warning(f"无法读取验证结果: {e}")
             
-            if build_result["success"]:
-                result.status = DeploymentStatus.VERIFYING
+            # 根据验证结果决定下一步
+            if verification_result:
+                overall_status = verification_result.get("overall_status", "failed")
                 
-                # 尝试运行容器
-                container_name = f"test-{tool.repo_name}".lower().replace(' ', '-')
-                run_result = run_docker_container(
-                    image_name=f"{image_name}:latest",
-                    container_name=container_name
-                )
-                
-                if run_result["success"]:
-                    result.container_id = run_result["container_id"]
+                if overall_status == "success":
                     result.status = DeploymentStatus.SUCCESS
-                    result.verification_notes = "构建和运行验证成功"
+                    result.verification_notes = "构建和功能验证成功"
                     
                     yield WorkflowMessage(
-                        content=f"✅ 验证成功！镜像 {image_name} 已构建并运行",
+                        content=f"✅ 验证成功！镜像 {image_name} 已构建并通过功能测试",
                         level="success"
                     )
                     return
+                
+                elif overall_status == "needs_fix" and attempt < max_retries - 1:
+                    # 需要修复 Dockerfile
+                    missing_deps = verification_result.get("missing_dependencies", [])
+                    error_summary = verification_result.get("error_summary", "")
+                    fix_suggestions = verification_result.get("fix_suggestions", [])
+                    
+                    yield WorkflowMessage(
+                        content=f"⚠️ 第 {attempt + 1} 次验证发现问题，尝试自动修复...\n"
+                                f"问题: {error_summary}\n"
+                                f"缺失依赖: {', '.join(missing_deps) if missing_deps else '无'}",
+                        level="warning"
+                    )
+                    
+                    # 调用生成器 Agent 修复 Dockerfile
+                    fix_prompt = f"""
+请修复 Dockerfile 以解决以下问题：
+
+**工具名称**: {tool.name}
+**领域**: {tool.domain}
+**Dockerfile 路径**: {result.dockerfile_path}
+
+**验证发现的问题**:
+{error_summary}
+
+**缺失的依赖**: {', '.join(missing_deps) if missing_deps else '无'}
+
+**修复建议**:
+{chr(10).join(f'- {s}' for s in fix_suggestions) if fix_suggestions else '无'}
+
+请使用 patch_dockerfile 工具获取当前 Dockerfile，然后生成修复后的版本。
+
+对于科学计算工具，请确保包含：
+- 完整的编译工具链：gfortran, gcc, g++, make, cmake
+- MPI 支持：openmpi-bin, libopenmpi-dev
+- HDF5 支持：libhdf5-openmpi-dev, hdf5-tools
+- 其他必要的科学计算库
+"""
+                    
+                    try:
+                        self.generator_agent.run(fix_prompt)
+                        
+                        yield WorkflowMessage(
+                            content=f"🔧 Dockerfile 已修复，准备重新验证...",
+                            level="info"
+                        )
+                        
+                        # 继续下一次循环重新验证
+                        continue
+                        
+                    except Exception as e:
+                        yield WorkflowMessage(
+                            content=f"❌ Dockerfile 修复失败: {str(e)}",
+                            level="error"
+                        )
+                
                 else:
-                    result.verification_notes = f"容器运行失败: {run_result.get('error', '')}"
+                    # 验证失败且无法修复或已达最大重试次数
+                    result.verification_notes = error_summary if 'error_summary' in verification_result else "验证失败"
+                    
+                    if attempt < max_retries - 1:
+                        yield WorkflowMessage(
+                            content=f"⚠️ 第 {attempt + 1} 次尝试失败，正在重试...\n原因: {result.verification_notes}",
+                            level="warning"
+                        )
             else:
-                result.verification_notes = f"构建失败: {build_result.get('error', '')}"
-            
-            if attempt < max_retries - 1:
-                yield WorkflowMessage(
-                    content=f"⚠️ 第 {attempt + 1} 次尝试失败，正在重试...\n原因: {result.verification_notes}",
-                    level="warning"
+                # 没有收到结构化的验证结果，使用简化检查
+                from tools.docker_tools import build_docker_image, run_docker_container
+                
+                build_result = build_docker_image(
+                    dockerfile_path=result.dockerfile_path,
+                    image_name=image_name
                 )
+                
+                if build_result["success"]:
+                    result.status = DeploymentStatus.VERIFYING
+                    
+                    # 尝试运行容器
+                    container_name = f"test-{tool.repo_name}".lower().replace(' ', '-')
+                    run_result = run_docker_container(
+                        image_name=f"{image_name}:latest",
+                        container_name=container_name
+                    )
+                    
+                    if run_result["success"]:
+                        result.container_id = run_result["container_id"]
+                        result.status = DeploymentStatus.SUCCESS
+                        result.verification_notes = "构建和运行验证成功（未进行功能测试）"
+                        
+                        yield WorkflowMessage(
+                            content=f"✅ 验证成功！镜像 {image_name} 已构建并运行",
+                            level="success"
+                        )
+                        return
+                    else:
+                        result.verification_notes = f"容器运行失败: {run_result.get('error', '')}"
+                else:
+                    result.verification_notes = f"构建失败: {build_result.get('error', '')}"
+                
+                if attempt < max_retries - 1:
+                    yield WorkflowMessage(
+                        content=f"⚠️ 第 {attempt + 1} 次尝试失败，正在重试...\n原因: {result.verification_notes}",
+                        level="warning"
+                    )
         
         # 所有重试都失败
         result.status = DeploymentStatus.FAILED
