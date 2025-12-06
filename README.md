@@ -241,12 +241,38 @@ python view_logs.py --analyze
 
 详细说明请查看 [LOGGING.md](LOGGING.md)
 
+### 批量部署报告
+
+批量部署完成后会自动生成汇总报告：
+
+```bash
+# 批量部署
+python main.py --batch --limit 10
+
+# 自动生成并显示报告
+# 同时保存到 results/batch_report_*.json 和 *.md
+```
+
+**手动生成报告**：
+
+```bash
+# 控制台输出
+python generate_batch_report.py
+
+# 生成文件
+python generate_batch_report.py --format json
+python generate_batch_report.py --format markdown
+```
+
+详细说明请查看 [BATCH_REPORT.md](BATCH_REPORT.md)
+
 ## ⚠️ 注意事项
 
 1. **API 额度**: 每个工具的分析和生成会消耗 OpenAI API 额度
 2. **磁盘空间**: 克隆仓库和构建镜像需要足够的磁盘空间
 3. **网络环境**: 部分仓库可能需要科学上网
 4. **Docker 资源**: 构建和运行容器需要足够的内存和 CPU
+5. **私有仓库**: GitLab 或需要认证的私有仓库会被自动跳过
 
 ## 🐛 故障排除
 

@@ -112,11 +112,40 @@ def git_clone(
             "message": f"成功克隆到: {full_path}"
         }
     else:
-        return {
-            "success": False,
-            "path": "",
-            "message": f"克隆失败: {result['stderr']}"
-        }
+        error_output = result.get("stderr", "") + result.get("stdout", "")
+        
+        # 检测需要认证的错误模式
+        auth_error_patterns = [
+            "Authentication failed",
+            "authentication failed",
+            "Access denied",
+            "access denied",
+            "Permission denied",
+            "permission denied",
+            "fatal: could not read Username",
+            "fatal: could not read Password",
+            "private repository",
+            "Repository not found",  # 有时是私有仓库
+            "HTTP Basic: Access denied",
+        ]
+        
+        is_auth_error = any(pattern in error_output for pattern in auth_error_patterns)
+        
+        if is_auth_error:
+            return {
+                "success": False,
+                "skipped": True,  # 标记为跳过
+                "path": "",
+                "error": "需要认证访问（私有仓库/GitLab），已跳过",
+                "message": f"跳过需要认证的仓库: {repo_url}",
+                "details": error_output[:200]  # 保留部分错误信息用于调试
+            }
+        else:
+            return {
+                "success": False,
+                "path": "",
+                "message": f"克隆失败: {result['stderr']}"
+            }
 
 
 def search_files(

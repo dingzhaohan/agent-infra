@@ -240,6 +240,26 @@ def run_batch_deployment(
         console.print(response.content)
         # 也记录到日志文件
         logger.info(response.content)
+    
+    # 批量部署完成后，自动生成报告
+    console.print("\n")
+    console.print(Panel("📊 正在生成批量部署报告...", style="bold cyan"))
+    logger.info("批量部署完成，生成汇总报告")
+    
+    try:
+        from generate_batch_report import generate_batch_report
+        
+        # 生成控制台报告
+        generate_batch_report(output_format="console")
+        
+        # 同时生成 JSON 和 Markdown 报告保存到文件
+        generate_batch_report(output_format="json")
+        generate_batch_report(output_format="markdown")
+        
+        logger.info("批量部署报告生成完成")
+    except Exception as e:
+        console.print(f"[yellow]警告: 报告生成失败: {e}[/yellow]")
+        logger.warning(f"报告生成失败: {e}")
 
 
 def interactive_mode():
