@@ -43,3 +43,11 @@ MAX_RETRIES = int(os.getenv("MAX_RETRIES", "10"))
 # - 默认 2，可以通过环境变量 MAX_CONCURRENT_TOOLS 配置
 MAX_CONCURRENT_TOOLS = int(os.getenv("MAX_CONCURRENT_TOOLS", "2"))
 
+# Docker 镜像配置
+# DOCKER_REGISTRY: Docker 镜像仓库地址
+# DOCKER_NAMESPACE: Docker 镜像命名空间
+# DOCKER_TAG: Docker 镜像默认标签
+DOCKER_REGISTRY = os.getenv("DOCKER_REGISTRY", "registry.dp.tech")
+DOCKER_NAMESPACE = os.getenv("DOCKER_NAMESPACE", "davinci")
+DOCKER_TAG = os.getenv("DOCKER_TAG", "latest")
+

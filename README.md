@@ -54,7 +54,12 @@ pip install -r requirements.txt
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_MODEL=gpt-4o
 
-# Docker 配置
+# Docker 镜像配置
+DOCKER_REGISTRY=registry.dp.tech  # 镜像仓库地址
+DOCKER_NAMESPACE=davinci          # 命名空间
+DOCKER_TAG=latest                 # 镜像标签
+
+# Docker 运行配置
 DOCKER_TIMEOUT=600
 DOCKER_MEMORY_LIMIT=4g
 
@@ -63,7 +68,8 @@ GIT_CLONE_DEPTH=1
 GIT_TIMEOUT=300
 
 # 工作流配置
-MAX_RETRIES=10  # Dockerfile 生成和验证的重试次数（默认 10）
+MAX_RETRIES=10           # Dockerfile 生成和验证的重试次数（默认 10）
+MAX_CONCURRENT_TOOLS=2   # 并发处理工具数量（默认 2）
 ```
 
 ### 3. 确保 Docker 运行中
@@ -206,7 +212,7 @@ GitHub/GitLab URL
   "status": "success",
   "local_path": "/path/to/repos/scikit-fem",
   "dockerfile_path": "/path/to/repos/scikit-fem/Dockerfile.generated",
-  "image_name": "scitools/scikit-fem",
+  "image_name": "registry.dp.tech/davinci/scikit-fem:latest",
   "started_at": "2024-01-01T00:00:00",
   "completed_at": "2024-01-01T00:05:00"
 }
@@ -266,6 +272,48 @@ python generate_batch_report.py --format markdown
 
 详细说明请查看 [BATCH_REPORT.md](BATCH_REPORT.md)
 
+## 🐳 Docker 镜像配置
+
+系统会自动构建符合以下格式的 Docker 镜像：
+
+**默认格式**: `registry.dp.tech/davinci/{tool-name}:latest`
+
+**示例镜像**:
+- `registry.dp.tech/davinci/scikit-fem:latest`
+- `registry.dp.tech/davinci/abinit:latest`
+- `registry.dp.tech/davinci/calculix:latest`
+
+### 自定义镜像名称
+
+通过环境变量配置镜像仓库、命名空间和标签：
+
+```bash
+# 使用自定义仓库
+export DOCKER_REGISTRY="docker.io"
+export DOCKER_NAMESPACE="myusername"
+export DOCKER_TAG="v1.0.0"
+
+python main.py --tool "scikit-fem"
+# 生成镜像: docker.io/myusername/scikit-fem:v1.0.0
+```
+
+详细配置说明请查看 [DOCKER_IMAGE_CONFIG.md](DOCKER_IMAGE_CONFIG.md)
+
+### 镜像推送
+
+```bash
+# 登录仓库
+docker login registry.dp.tech
+
+# 推送单个镜像
+docker push registry.dp.tech/davinci/scikit-fem:latest
+
+# 批量推送所有镜像
+docker images --format "{{.Repository}}:{{.Tag}}" | \
+  grep "registry.dp.tech/davinci/" | \
+  xargs -I {} docker push {}
+```
+
 ## ⚠️ 注意事项
 
 1. **API 额度**: 每个工具的分析和生成会消耗 OpenAI API 额度
@@ -273,6 +321,7 @@ python generate_batch_report.py --format markdown
 3. **网络环境**: 部分仓库可能需要科学上网
 4. **Docker 资源**: 构建和运行容器需要足够的内存和 CPU
 5. **私有仓库**: GitLab 或需要认证的私有仓库会被自动跳过
+6. **镜像仓库**: 推送镜像需要先登录对应的仓库
 
 ## 🐛 故障排除
 

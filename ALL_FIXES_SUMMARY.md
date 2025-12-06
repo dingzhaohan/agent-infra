@@ -1,5 +1,51 @@
 # 所有修复总结
 
+## 最新更新
+
+### 9. Docker 镜像命名格式配置 (2025-12-06)
+
+**问题**: 
+- 原有镜像命名格式固定为 `scitools/{tool-name}:latest`
+- 无法自定义镜像仓库和命名空间
+- 不符合企业私有仓库的命名规范
+
+**解决方案**:
+- 在 `config.py` 中添加三个配置项：
+  - `DOCKER_REGISTRY`: 镜像仓库地址（默认 `registry.dp.tech`）
+  - `DOCKER_NAMESPACE`: 命名空间（默认 `davinci`）
+  - `DOCKER_TAG`: 镜像标签（默认 `latest`）
+- 更新 `workflow.py` 中的镜像名称生成逻辑
+- 支持通过环境变量自定义配置
+
+**新格式**: `registry.dp.tech/davinci/{tool-name}:latest`
+
+**示例**:
+```bash
+# 默认配置
+scikit-fem → registry.dp.tech/davinci/scikit-fem:latest
+
+# 自定义配置
+export DOCKER_REGISTRY="docker.io"
+export DOCKER_NAMESPACE="myuser"
+export DOCKER_TAG="v1.0.0"
+# scikit-fem → docker.io/myuser/scikit-fem:v1.0.0
+```
+
+**相关文件**:
+- `config.py`: 新增配置项
+- `workflow.py`: 更新镜像名称生成逻辑（第 416-423 行）
+- `DOCKER_IMAGE_CONFIG.md`: 详细配置文档
+- `DOCKER_IMAGE_QUICKREF.md`: 快速参考
+- `README.md`: 快速开始指南
+
+**影响**: 
+- ✅ 支持企业私有镜像仓库
+- ✅ 灵活的命名空间管理
+- ✅ 版本标签可配置
+- ✅ 向后兼容（通过环境变量）
+
+---
+
 ## 本次会话完成的所有修复
 
 ### 1. ✅ 元仓库（Meta-package）检测与处理

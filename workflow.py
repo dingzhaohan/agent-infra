@@ -13,7 +13,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Queue, Process
 import queue
 
-from config import REPOS_DIR, RESULTS_DIR, MAX_RETRIES, MAX_CONCURRENT_TOOLS
+from config import REPOS_DIR, RESULTS_DIR, MAX_RETRIES, MAX_CONCURRENT_TOOLS, DOCKER_REGISTRY, DOCKER_NAMESPACE, DOCKER_TAG
 from utils.list_parser import Tool, parse_list_md
 from agents.repo_analyzer import create_repo_analyzer_agent
 from agents.dockerfile_generator import create_dockerfile_generator_agent
@@ -414,11 +414,16 @@ class RepoDeploymentWorkflow:
         result.status = DeploymentStatus.BUILDING
         
         # 生成镜像名称
-        image_name = f"scitools/{tool.repo_name}".lower().replace(' ', '-')
-        result.image_name = image_name
+        # 格式: registry.dp.tech/davinci/tool-name:tag
+        safe_name = tool.repo_name.lower().replace(' ', '-').replace('/', '-')
+        image_name = f"{DOCKER_REGISTRY}/{DOCKER_NAMESPACE}/{safe_name}"
+        image_tag = DOCKER_TAG
+        image_full = f"{image_name}:{image_tag}"
+        
+        result.image_name = image_full
         
         yield WorkflowMessage(
-            content=f"🔨 正在构建镜像: {image_name}...",
+            content=f"🔨 正在构建镜像: {image_full}...",
             level="info"
         )
         
@@ -448,7 +453,7 @@ class RepoDeploymentWorkflow:
 **工具名称**: {tool.name}
 **领域**: {tool.domain}
 **Dockerfile 路径**: {result.dockerfile_path}
-**镜像名称**: {image_name}
+**镜像名称**: {image_full}
 **尝试次数**: {attempt + 1}/{max_retries}
 
 请执行完整的验证流程：
@@ -582,7 +587,8 @@ class RepoDeploymentWorkflow:
                 
                 build_result = build_docker_image(
                     dockerfile_path=result.dockerfile_path,
-                    image_name=image_name
+                    image_name=image_name,
+                    tag=image_tag
                 )
                 
                 if build_result["success"]:
@@ -591,7 +597,7 @@ class RepoDeploymentWorkflow:
                     # 尝试运行容器
                     container_name = f"test-{tool.repo_name}".lower().replace(' ', '-')
                     run_result = run_docker_container(
-                        image_name=f"{image_name}:latest",
+                        image_name=image_full,
                         container_name=container_name
                     )
                     
