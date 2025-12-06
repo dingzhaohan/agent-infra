@@ -22,6 +22,10 @@ def _detect_build_context(dockerfile_path: Path) -> tuple[str, str]:
     """
     智能检测 Docker build context
     
+    检测逻辑：
+    1. 首先检查 Dockerfile 的父目录（最常见情况，如 FEBio: COPY ./common/linux）
+    2. 如果没找到，向上查找（用于 dolfinx: COPY dolfinx/docker/...）
+    
     Args:
         dockerfile_path: Dockerfile 的路径
     
@@ -34,24 +38,40 @@ def _detect_build_context(dockerfile_path: Path) -> tuple[str, str]:
             content = f.read()
         
         # 检查是否有包含仓库名的 COPY/ADD 指令
-        # 例如: COPY dolfinx/docker/some-file 或 COPY ./dolfinx/
+        # 例如: COPY dolfinx/docker/some-file 或 COPY ./common/linux
         import re
         copy_pattern = r'(?:COPY|ADD)\s+(\S+)'
         matches = re.findall(copy_pattern, content, re.IGNORECASE)
         
         if matches:
             for match in matches:
-                # 如果路径包含多层级（如 xxx/yyy/zzz），说明需要更高层的 context
-                parts = match.strip().split('/')
-                if len(parts) >= 2 and not match.startswith(('http://', 'https://', '--')):
-                    # 找到第一个路径部分，检查是否是仓库名
+                # 清理路径（移除 ./ 前缀和引号）
+                clean_match = match.strip().lstrip('./').strip('"\'')
+                if not clean_match:
+                    continue
+                    
+                parts = clean_match.split('/')
+                
+                if len(parts) >= 1 and not match.startswith(('http://', 'https://', '--')):
                     first_part = parts[0]
                     
-                    # 尝试找到仓库根目录
-                    current = dockerfile_path.parent
+                    # 首先检查 Dockerfile 的父目录（最常见的情况，如 FEBio）
+                    # FEBio: Dockerfile 在 infrastructure/, COPY ./common/linux
+                    # common 在 infrastructure/common/, 所以 context 应该是 infrastructure/
+                    dockerfile_parent = dockerfile_path.parent
+                    if (dockerfile_parent / first_part).exists():
+                        # ✅ 在当前目录找到，使用当前目录作为 context
+                        context_path = str(dockerfile_parent)
+                        relative_dockerfile = dockerfile_path.name
+                        return context_path, relative_dockerfile
+                    
+                    # 如果当前目录没找到，向上查找（用于 dolfinx 这种情况）
+                    # dolfinx: Dockerfile 在 docker/, COPY dolfinx/docker/...
+                    # dolfinx 在 repos/dolfinx/, 所以 context 应该是 repos/
+                    current = dockerfile_parent
                     for _ in range(5):  # 最多向上查找5层
                         if (current.parent / first_part).exists():
-                            # 找到了！使用这个目录作为 context
+                            # 找到了！使用父目录作为 context
                             context_path = str(current.parent)
                             relative_dockerfile = str(dockerfile_path.relative_to(current.parent))
                             return context_path, relative_dockerfile
