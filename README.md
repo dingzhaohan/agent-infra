@@ -63,7 +63,7 @@ GIT_CLONE_DEPTH=1
 GIT_TIMEOUT=300
 
 # 工作流配置
-MAX_RETRIES=3
+MAX_RETRIES=10  # Dockerfile 生成和验证的重试次数（默认 10）
 ```
 
 ### 3. 确保 Docker 运行中

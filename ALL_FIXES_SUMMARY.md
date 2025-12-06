@@ -138,7 +138,40 @@
 
 ---
 
-### 8. ✅ Git 交互式提示问题修复
+### 8. ✅ 重试次数可配置化
+
+**问题**: 重试次数硬编码为 3 次，对于复杂的科学计算工具可能不够
+
+**修复**:
+- 将默认重试次数从 **3 次增加到 10 次**
+- 通过环境变量 `MAX_RETRIES` 可配置
+- 添加详细的配置说明文档
+- 支持临时覆盖和永久配置
+
+**配置方式**:
+```bash
+# 使用默认值（10 次）
+python main.py --tool "YourTool"
+
+# 临时覆盖
+MAX_RETRIES=15 python main.py --tool "ComplexTool"
+
+# 永久配置（.env 文件）
+echo "MAX_RETRIES=20" >> .env
+```
+
+**效果**:
+- ✅ 提高复杂工具的成功率
+- ✅ 灵活配置适应不同场景
+- ✅ 向后兼容现有代码
+
+**文件**: `config.py`, `README.md`
+
+详细说明: [CONFIG_RETRIES.md](CONFIG_RETRIES.md)
+
+---
+
+### 9. ✅ Git 交互式提示问题修复
 
 **问题**: Git clone 私有仓库时会卡住等待用户输入
 
@@ -191,6 +224,10 @@
    - 并发安全性测试脚本
    - 验证临时文件隔离机制
 
+10. **CONFIG_RETRIES.md**（新增）
+   - 重试次数配置说明
+   - 场景分析和性能建议
+
 ### 文档文件
 
 1. **METAPACKAGE_DETECTION.md** - 元仓库检测与处理说明
@@ -203,8 +240,9 @@
 8. **BUGFIX_VARIABLE_SCOPE.md** - 变量作用域修复说明
 9. **BUGFIX_GIT_INTERACTIVE.md** - Git 交互式提示修复说明
 10. **BUGFIX_CONCURRENT_TEMP_FILE.md** - 并发临时文件冲突修复
-11. **LOGGING.md** - 更新日志系统说明（包含 DEBUG 日志）
-12. **ALL_FIXES_SUMMARY.md** - 本文档
+11. **CONFIG_RETRIES.md** - 重试次数配置说明
+12. **LOGGING.md** - 更新日志系统说明（包含 DEBUG 日志）
+13. **ALL_FIXES_SUMMARY.md** - 本文档
 
 ---
 
@@ -277,6 +315,7 @@ python view_logs.py --latest --grep "DEBUG" | head -50
 - ❌ 变量作用域错误
 - ❌ Git clone 私有仓库会卡住
 - ❌ 并发模式下临时文件冲突
+- ❌ 重试次数固定为 3 次，不可配置
 
 ### 修复后
 
@@ -288,6 +327,7 @@ python view_logs.py --latest --grep "DEBUG" | head -50
 - ✅ 所有变量正确访问
 - ✅ 私有仓库自动跳过，不会卡住
 - ✅ 并发场景完全隔离，无文件冲突
+- ✅ 重试次数可配置，默认 10 次
 
 ---
 

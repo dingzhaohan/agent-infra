@@ -32,6 +32,14 @@ GIT_CLONE_DEPTH = int(os.getenv("GIT_CLONE_DEPTH", "1"))  # 浅克隆
 GIT_TIMEOUT = int(os.getenv("GIT_TIMEOUT", "300"))  # 5分钟
 
 # 工作流配置
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+# MAX_RETRIES: Dockerfile 生成和验证的最大重试次数
+# - 当 verifier 检测到问题时，会调用 generator 修复 Dockerfile
+# - 然后重新验证，最多重试 MAX_RETRIES 次
+# - 默认 10 次，可以通过环境变量 MAX_RETRIES 配置
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "10"))
+
+# MAX_CONCURRENT_TOOLS: 并发处理工具的最大数量
+# - 在批量部署模式下使用
+# - 默认 2，可以通过环境变量 MAX_CONCURRENT_TOOLS 配置
 MAX_CONCURRENT_TOOLS = int(os.getenv("MAX_CONCURRENT_TOOLS", "2"))
 
