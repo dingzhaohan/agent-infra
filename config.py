@@ -20,6 +20,7 @@ LOGS_DIR.mkdir(exist_ok=True)
 
 # LLM 配置
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_API_BASE = os.getenv("OPENAI_API_BASE", "")  # 自定义 API 地址，留空则使用官方地址
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 
 # Docker 配置

@@ -7,7 +7,7 @@ from agno.tools import tool
 from typing import Optional
 import json
 
-from config import OPENAI_MODEL, REPOS_DIR
+from config import OPENAI_MODEL, OPENAI_API_BASE, REPOS_DIR
 from tools.terminal_tools import git_clone, read_file_content, search_files
 from tools.file_tools import (
     analyze_project_structure,
@@ -159,7 +159,7 @@ def create_repo_analyzer_agent() -> Agent:
     """
     return Agent(
         name="RepoAnalyzer",
-        model=OpenAIChat(id=OPENAI_MODEL),
+        model=OpenAIChat(id=OPENAI_MODEL, base_url=OPENAI_API_BASE or None),
         tools=[
             clone_repository,
             analyze_repo_structure,

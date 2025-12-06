@@ -7,7 +7,7 @@ from agno.tools import tool
 import json
 import time
 
-from config import OPENAI_MODEL, DOCKER_TIMEOUT
+from config import OPENAI_MODEL, OPENAI_API_BASE, DOCKER_TIMEOUT
 from tools.docker_tools import (
     build_docker_image,
     run_docker_container,
@@ -238,7 +238,7 @@ def create_verifier_agent() -> Agent:
     """
     return Agent(
         name="DockerVerifier",
-        model=OpenAIChat(id=OPENAI_MODEL),
+        model=OpenAIChat(id=OPENAI_MODEL, base_url=OPENAI_API_BASE or None),
         tools=[
             build_image,
             run_container,

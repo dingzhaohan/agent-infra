@@ -7,7 +7,7 @@ from agno.tools import tool
 from typing import Optional
 import json
 
-from config import OPENAI_MODEL
+from config import OPENAI_MODEL, OPENAI_API_BASE
 from tools.file_tools import write_dockerfile
 from tools.terminal_tools import read_file_content
 
@@ -327,7 +327,7 @@ def create_dockerfile_generator_agent() -> Agent:
     """
     return Agent(
         name="DockerfileGenerator",
-        model=OpenAIChat(id=OPENAI_MODEL),
+        model=OpenAIChat(id=OPENAI_MODEL, base_url=OPENAI_API_BASE or None),
         tools=[
             get_dockerfile_template,
             save_dockerfile,
