@@ -10,7 +10,7 @@ PDE / FEM
 dolfinx (FEniCSx)
 rolling
 https://github.com/FEniCS/dolfinx
-https://docs.fenicsproject.org/dolfinx
+https://docs.fenicsproject.org/dolfinx/main/python/installation.html
 
 PDE / FEM（轻量 Python）
 固体力学
@@ -38,7 +38,7 @@ PDE / FEM 通用库
 GetFEM
 rolling
 https://gitlab.com/getfem-project/getfem
-https://getfem.readthedocs.io/
+https://getfem.readthedocs.io/en/latest/download.html
 
 PDE / FEM 通用库
 固体力学
@@ -59,7 +59,7 @@ https://www.dhondt.de/
 FEBio
 rolling
 https://github.com/febiosoftware/FEBio
-https://febio.org/documentation/
+https://febio.org/
 
 PDE / FVM
 计算数学
@@ -170,36 +170,36 @@ LBM 流体
 流体力学
 Palabos
 rolling
-https://github.com/palabos-unige/palabos
-https://palabos.unige.ch/documentation/
+https://gitlab.com/unigespc/palabos
+https://palabos.unige.ch/
 
 LBM 流体
 流体力学
 OpenLB
 rolling
+https://gitlab.com/openlb/release
 https://www.openlb.net/
-https://www.openlb.net/documentation/
 
 流固耦合库
 多场耦合
 preCICE
 rolling
 https://github.com/precice/precice
-https://precice.org/docs/
+https://precice.org/quickstart.html
 
 通用多物理框架
 多场耦合
 MOOSE
 rolling
 https://github.com/idaholab/moose
-https://mooseframework.inl.gov/
+https://mooseframework.inl.gov/getting_started/installation/conda.html
 
 多物理 FEM 平台
 多场耦合
 Elmer FEM
 9.0+
 https://github.com/ElmerCSC/elmerfem
-https://www.elmerfem.org/blog/documentation/
+https://www.openlb.net/
 
 DFT（平面波）
 材料/原子尺度
@@ -234,7 +234,7 @@ DFT（NAO）
 SIESTA
 rolling
 https://gitlab.com/siesta-project/siesta
-https://siesta-project.github.io/siesta/
+https://docs.siesta-project.org/projects/siesta/en/stable/installation/build-manually.html
 
 量子化学/电子结构
 材料/原子尺度
@@ -254,8 +254,8 @@ https://psicode.org/psi4manual/master/
 材料/原子尺度
 ASE
 3.x
-https://github.com/Atomic-Simulation-Environment/ase
-https://wiki.fysik.dtu.dk/ase/
+https://gitlab.com/ase/ase
+https://ase-lib.org/install.html
 
 材料结构/数据库
 材料/原子尺度
@@ -388,7 +388,7 @@ https://torchmd-net.readthedocs.io/
 CHGNet
 rolling
 https://github.com/CederGroupHub/chgnet
-https://chgnet.readthedocs.io/
+https://chgnet.lbl.gov/
 预训练权重（可选/常用）
 预训练材料GNN势（同类补全）
 材料/ML势
@@ -402,14 +402,14 @@ https://github.com/MDIL-SNU/SevenNet
 FLARE
 rolling
 https://github.com/mir-group/flare
-https://flare.readthedocs.io/
+https://flare.network/
 
 化学信息学
 化学/材料
 RDKit
 2025.09.x
 https://github.com/rdkit/rdkit
-https://www.rdkit.org/docs/
+https://www.rdkit.org/docs/Install.html
 
 通用分子操作
 化学/材料
@@ -507,7 +507,7 @@ https://www2.mmm.ucar.edu/wrf/users/
 GEOS-Chem
 rolling
 https://github.com/geoschem/geos-chem
-https://geoschem.readthedocs.io/
+https://geos-chem.readthedocs.io/en/stable/getting-started/quick-start.html
 
 地幔对流/构造
 地球物理
@@ -521,7 +521,7 @@ https://aspect.geodynamics.org/
 PyLith
 rolling
 https://github.com/geodynamics/pylith
-https://geodynamics.github.io/pylith/
+https://pylith.readthedocs.io/en/latest/
 
 多尺度从头算/MD
 材料/原子尺度
@@ -549,7 +549,7 @@ https://genecode.org/documentation/
 Geant4（二期）
 11.x
 https://github.com/Geant4/geant4
-https://geant4-userdoc.web.cern.ch/UsersGuides/UsersGuide/
+https://geant4.web.cern.ch/
 
 NGS 主链路（BAM/CRAM）
 生物信息
@@ -702,7 +702,7 @@ https://gatk.broadinstitute.org/hc/en-us
 生物信息
 fgsea
 1.x
-https://github.com/fgsea/fgsea
+https://github.com/alserglab/fgsea
 https://bioconductor.org/packages/fgsea
 公共基因集库（MSigDB/GO/KEGG 等，常用）
 基因调控网络推断
@@ -766,20 +766,20 @@ https://cole-trapnell-lab.github.io/monocle3/
 WOT (Optimal Transport)
 rolling
 https://github.com/broadinstitute/wot
-https://wot.readthedocs.io
+https://broadinstitute.github.io/wot/
 
 单细胞时动力学分析
 生物信息/单细胞
 DeepRUOT
 rolling
-https://github.com/zhenyizhang/DeepRUOTv2
-https://deepruot.readthedocs.io
+https://github.com/zhenyiizhang/DeepRUOTv2
+https://deepruot.readthedocs.io/en/latest/started.html
 
 单细胞扰动识别
 生物信息/单细胞
 GEARS
 rolling
-https://github.com/pinellolab/GEARS
+https://github.com/lampepfl/gears
 
 预训练权重/基准扰动数据集（常用）
 表观 + RNA 多组学
@@ -829,7 +829,7 @@ https://github.com/dauparas/ProteinMPNN#readme
 AutoDock Vina
 1.2.x
 https://github.com/ccsb-scripps/AutoDock-Vina
-https://vina.scripps.edu/manual/
+https://vina.scripps.edu/manual/#linux
 
 生物图像平台
 生物成像
@@ -850,5 +850,5 @@ https://cellpose.readthedocs.io/
 MONAI
 rolling
 https://github.com/Project-MONAI/MONAI
-https://docs.monai.io/
+https://docs.monai.org.cn/en/stable/installation.html
 预训练权重/医学公共数据集（可选/常用）
