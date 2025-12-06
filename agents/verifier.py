@@ -232,9 +232,9 @@ def report_verification_result(
     container_running: bool,
     functional_test_success: bool,
     overall_status: str,
-    error_summary: str = None,
-    missing_dependencies: list = None,
-    fix_suggestions: list = None
+    error_summary: str = "",
+    missing_dependencies: str = "",
+    fix_suggestions: str = ""
 ) -> str:
     """
     报告验证结果 - 必须在验证流程结束时调用此工具
@@ -245,20 +245,24 @@ def report_verification_result(
         functional_test_success: 功能测试是否通过（检查工具/编译器是否可用）
         overall_status: 总体状态 ("success", "failed", "needs_fix")
         error_summary: 错误摘要（如果有）
-        missing_dependencies: 缺失的依赖列表（如 ["gfortran", "gcc", "make"]）
-        fix_suggestions: 修复建议列表
+        missing_dependencies: 缺失的依赖，用逗号分隔（如 "gfortran, gcc, make"）
+        fix_suggestions: 修复建议，用分号分隔（如 "安装gfortran; 设置环境变量"）
     
     Returns:
         确认消息
     """
+    # 将逗号/分号分隔的字符串转换为列表
+    missing_deps_list = [dep.strip() for dep in missing_dependencies.split(",")] if missing_dependencies else []
+    fix_suggestions_list = [fix.strip() for fix in fix_suggestions.split(";")] if fix_suggestions else []
+    
     result = {
         "build_success": build_success,
         "container_running": container_running,
         "functional_test_success": functional_test_success,
         "overall_status": overall_status,
-        "error_summary": error_summary,
-        "missing_dependencies": missing_dependencies or [],
-        "fix_suggestions": fix_suggestions or []
+        "error_summary": error_summary or "",
+        "missing_dependencies": missing_deps_list,
+        "fix_suggestions": fix_suggestions_list
     }
     
     # 将结果保存到临时文件供 workflow 读取
@@ -356,6 +360,10 @@ def create_verifier_agent() -> Agent:
             "- 如果构建失败或功能测试失败：overall_status='failed'",
             "- 如果需要修复 Dockerfile：overall_status='needs_fix'",
             "- 必须提供详细的 error_summary 和 fix_suggestions",
+            "",
+            "**参数格式要求**：",
+            "- missing_dependencies: 用逗号分隔的字符串，如 'gfortran, gcc, make'",
+            "- fix_suggestions: 用分号分隔的字符串，如 '安装gfortran; 设置环境变量'",
             "",
             "## 输出格式",
             "验证报告应包含：",
