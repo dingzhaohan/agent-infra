@@ -4,6 +4,7 @@
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from agno.tools import tool
+from typing import List, Optional
 import json
 import time
 
@@ -233,8 +234,8 @@ def report_verification_result(
     functional_test_success: bool,
     overall_status: str,
     error_summary: str = None,
-    missing_dependencies: list = None,
-    fix_suggestions: list = None
+    missing_dependencies: Optional[List[str]] = None,
+    fix_suggestions: Optional[List[str]] = None
 ) -> str:
     """
     报告验证结果 - 必须在验证流程结束时调用此工具
