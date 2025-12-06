@@ -482,6 +482,10 @@ class RepoDeploymentWorkflow:
             # 根据验证结果决定下一步
             if verification_result:
                 overall_status = verification_result.get("overall_status", "failed")
+                # 提前提取这些变量，确保在所有分支都可用
+                error_summary = verification_result.get("error_summary", "")
+                missing_deps = verification_result.get("missing_dependencies", [])
+                fix_suggestions = verification_result.get("fix_suggestions", [])
                 
                 if overall_status == "success":
                     result.status = DeploymentStatus.SUCCESS
@@ -495,9 +499,6 @@ class RepoDeploymentWorkflow:
                 
                 elif overall_status == "needs_fix" and attempt < max_retries - 1:
                     # 需要修复 Dockerfile
-                    missing_deps = verification_result.get("missing_dependencies", [])
-                    error_summary = verification_result.get("error_summary", "")
-                    fix_suggestions = verification_result.get("fix_suggestions", [])
                     
                     yield WorkflowMessage(
                         content=f"⚠️ 第 {attempt + 1} 次验证发现问题，尝试自动修复...\n"
@@ -550,7 +551,7 @@ class RepoDeploymentWorkflow:
                 
                 else:
                     # 验证失败且无法修复或已达最大重试次数
-                    result.verification_notes = error_summary if 'error_summary' in verification_result else "验证失败"
+                    result.verification_notes = error_summary if error_summary else "验证失败"
                     
                     if attempt < max_retries - 1:
                         yield WorkflowMessage(

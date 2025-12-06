@@ -118,7 +118,7 @@ if __name__ == "__main__":
             print(f"未知示例: {example}")
             print("可用选项: concurrent, sequential, filter, compare")
     else:
-        print("使用方法:")xainzai
+        print("使用方法:")
         print("  python example_concurrent_deploy.py concurrent  # 并发部署")
         print("  python example_concurrent_deploy.py sequential  # 串行部署")
         print("  python example_concurrent_deploy.py filter      # 按领域过滤")
