@@ -287,10 +287,36 @@ docker run -it <image> /bin/bash
 - 查看 `/tmp/verifier_result.json` 是否存在
 - 查看 agent 日志确认功能测试是否执行
 
+## 日志查看
+
+### 查看运行日志
+
+系统会自动保存所有运行日志到 `logs/` 目录，使用北京时间命名。
+
+```bash
+# 列出所有日志
+python view_logs.py
+
+# 查看最新日志
+python view_logs.py --latest
+
+# 只看最后 50 行
+python view_logs.py --latest --tail 50
+
+# 过滤错误
+python view_logs.py --latest --grep "ERROR"
+
+# 分析统计
+python view_logs.py --analyze
+```
+
+详细说明请查看 [LOGGING.md](LOGGING.md)
+
 ## 更多帮助
 
 - 详细改进说明: [IMPROVEMENTS.md](IMPROVEMENTS.md)
 - 使用示例: [example_improved_workflow.py](example_improved_workflow.py)
 - 并发部署: [CONCURRENT_DEPLOYMENT.md](CONCURRENT_DEPLOYMENT.md)
+- 日志系统: [LOGGING.md](LOGGING.md)
 - 主文档: [README.md](README.md)
 

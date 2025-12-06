@@ -30,21 +30,76 @@
 """
 import argparse
 import sys
+import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from rich.prompt import Prompt, Confirm
+from rich.logging import RichHandler
 
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import REPOS_DIR, RESULTS_DIR, OPENAI_API_KEY, MAX_CONCURRENT_TOOLS
+from config import REPOS_DIR, RESULTS_DIR, LOGS_DIR, OPENAI_API_KEY, MAX_CONCURRENT_TOOLS
 from utils.list_parser import parse_list_md, get_tools_by_domain, get_tools_by_name
 from workflow import RepoDeploymentWorkflow, BatchDeploymentWorkflow, deploy_single_tool
 
 console = Console()
+
+
+def setup_logging():
+    """
+    配置日志系统：同时输出到控制台和文件
+    使用北京时间（UTC+8）作为时间戳
+    """
+    # 获取北京时间
+    beijing_tz = timezone(timedelta(hours=8))
+    beijing_time = datetime.now(beijing_tz)
+    
+    # 生成日志文件名：YYYYMMDD_HHMMSS_beijing.log
+    log_filename = beijing_time.strftime("%Y%m%d_%H%M%S_beijing.log")
+    log_path = LOGS_DIR / log_filename
+    
+    # 配置根日志记录器
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    # 清除已有的处理器（避免重复）
+    logger.handlers.clear()
+    
+    # 文件处理器：详细格式，包含时间戳
+    file_handler = logging.FileHandler(log_path, encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    file_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_handler.setFormatter(file_formatter)
+    
+    # 控制台处理器：使用 RichHandler 保持美观输出
+    console_handler = RichHandler(
+        console=console,
+        show_time=False,
+        show_path=False,
+        markup=True
+    )
+    console_handler.setLevel(logging.INFO)
+    
+    # 添加处理器
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    # 记录启动信息
+    logger.info("="*60)
+    logger.info(f"开源科学工具自动化部署系统启动")
+    logger.info(f"日志文件: {log_path}")
+    logger.info(f"北京时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("="*60)
+    
+    return str(log_path)
 
 
 def print_banner():
@@ -119,7 +174,9 @@ def list_tools(domain: str = None, limit: int = 20):
 
 def run_single_deployment(tool_name: str = None, repo_url: str = None, skip_verify: bool = False):
     """运行单个工具部署"""
+    logger = logging.getLogger(__name__)
     console.print(Panel(f"🚀 开始部署: {tool_name or repo_url}", style="bold green"))
+    logger.info(f"开始单个工具部署: {tool_name or repo_url}")
     
     try:
         result = deploy_single_tool(
@@ -131,15 +188,19 @@ def run_single_deployment(tool_name: str = None, repo_url: str = None, skip_veri
         if result:
             if result.get("status") == "success":
                 console.print("\n[bold green]✅ 部署成功![/bold green]")
+                logger.info(f"部署成功: {tool_name or repo_url}")
             elif result.get("status") == "skipped":
                 console.print("\n[bold yellow]⏭️ 分析完成（跳过验证）[/bold yellow]")
+                logger.info(f"分析完成（跳过验证）: {tool_name or repo_url}")
             else:
                 console.print(f"\n[bold red]❌ 部署失败: {result.get('error_message', '未知错误')}[/bold red]")
+                logger.error(f"部署失败: {tool_name or repo_url}, 错误: {result.get('error_message', '未知错误')}")
         
         return result
         
     except Exception as e:
         console.print(f"\n[bold red]❌ 部署异常: {str(e)}[/bold red]")
+        logger.exception(f"部署异常: {tool_name or repo_url}")
         return None
 
 
@@ -151,19 +212,23 @@ def run_batch_deployment(
     max_workers: int = MAX_CONCURRENT_TOOLS
 ):
     """运行批量部署"""
+    logger = logging.getLogger(__name__)
     tools = parse_list_md()
     
     if domain:
         tools = get_tools_by_domain(tools, domain)
         console.print(f"[yellow]筛选领域: {domain}, 共 {len(tools)} 个工具[/yellow]")
+        logger.info(f"筛选领域: {domain}, 共 {len(tools)} 个工具")
     
     if limit:
         tools = tools[:limit]
         console.print(f"[yellow]限制数量: {limit}[/yellow]")
+        logger.info(f"限制数量: {limit}")
     
     mode_text = "并发" if concurrent else "串行"
     workers_text = f"（{max_workers} 个并发进程）" if concurrent else ""
     console.print(Panel(f"🚀 开始批量部署 {len(tools)} 个工具 - {mode_text}模式{workers_text}", style="bold green"))
+    logger.info(f"开始批量部署: {len(tools)} 个工具, 模式={mode_text}, workers={max_workers if concurrent else 1}, skip_verify={skip_verify}")
     
     workflow = BatchDeploymentWorkflow(max_workers=max_workers)
     
@@ -173,6 +238,8 @@ def run_batch_deployment(
         concurrent=concurrent
     ):
         console.print(response.content)
+        # 也记录到日志文件
+        logger.info(response.content)
 
 
 def interactive_mode():
@@ -276,6 +343,9 @@ def interactive_mode():
 
 def main():
     """主函数"""
+    # 配置日志系统（最小侵入，只在这里调用一次）
+    log_file = setup_logging()
+    
     parser = argparse.ArgumentParser(
         description="开源科学工具自动化部署系统",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -343,6 +413,7 @@ def main():
         sys.exit(1)
     
     print_banner()
+    console.print(f"[dim]日志文件: {log_file}[/dim]\n")
     
     # 单个工具部署
     if args.tool or args.url:

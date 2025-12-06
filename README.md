@@ -195,6 +195,8 @@ GitHub/GitLab URL
 
 ## 📊 结果输出
 
+### 部署结果
+
 部署结果保存在 `results/` 目录，格式为 JSON：
 
 ```json
@@ -209,6 +211,35 @@ GitHub/GitLab URL
   "completed_at": "2024-01-01T00:05:00"
 }
 ```
+
+### 运行日志
+
+系统会自动保存所有运行日志到 `logs/` 目录，使用北京时间（UTC+8）作为时间戳命名：
+
+```
+logs/
+├── 20241206_143022_beijing.log
+├── 20241206_160145_beijing.log
+└── ...
+```
+
+**查看日志**：
+
+```bash
+# 列出所有日志
+python view_logs.py
+
+# 查看最新日志
+python view_logs.py --latest
+
+# 只看错误
+python view_logs.py --latest --grep "ERROR"
+
+# 分析统计
+python view_logs.py --analyze
+```
+
+详细说明请查看 [LOGGING.md](LOGGING.md)
 
 ## ⚠️ 注意事项
 
