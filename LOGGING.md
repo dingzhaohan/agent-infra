@@ -27,12 +27,19 @@
    - 配置信息
 
 2. **运行日志**
-   - INFO: 一般信息（如开始处理、完成等）
-   - WARNING: 警告信息
-   - ERROR: 错误信息
+   - **DEBUG**: 详细的调试信息（包括 Agno Agent 的执行细节、工具调用、HTTP 请求等）
+   - **INFO**: 一般信息（如开始处理、完成等）
+   - **WARNING**: 警告信息
+   - **ERROR**: 错误信息
    - 详细的操作流程记录
 
-3. **结果汇总**
+3. **Agent 调试信息**
+   - Agno Agent 的工具调用详情
+   - LLM API 请求和响应摘要
+   - HTTP 请求日志（httpx）
+   - 详细的执行步骤
+
+4. **结果汇总**
    - 成功/失败的工具列表
    - 统计信息
    - 错误详情
@@ -212,16 +219,29 @@ rm logs/*.log
    - 自动记录所有输出
 
 2. **双输出模式**
-   - 控制台：保持原有的美观输出（Rich）
-   - 文件：详细的结构化日志
+   - **控制台**: 保持原有的美观输出（Rich），只显示 INFO 及以上级别
+   - **文件**: 详细的结构化日志，包含所有 DEBUG 级别信息
 
-3. **北京时间**
+3. **完整的 Agent 调试信息**
+   - 捕获 Agno Agent 的所有 DEBUG 日志
+   - 记录工具调用详情
+   - 记录 LLM API 交互
+   - 记录 HTTP 请求日志（httpx）
+
+4. **北京时间**
    - 使用 UTC+8 时区
    - 文件名和日志内容都使用北京时间
 
-4. **自动创建**
+5. **自动创建**
    - 每次运行自动创建新日志文件
    - 按时间戳命名，永不覆盖
+
+### 日志级别配置
+
+- **根 Logger**: DEBUG（捕获所有日志）
+- **文件处理器**: DEBUG（记录所有级别到文件）
+- **控制台处理器**: INFO（只显示重要信息，避免干扰）
+- **相关库 Logger**: DEBUG（agno, httpx, litellm 等）
 
 ### 日志格式
 
@@ -229,8 +249,17 @@ rm logs/*.log
 ```
 2024-12-06 14:30:22 - __main__ - INFO - 开始批量部署: 5 个工具, 模式=串行
 2024-12-06 14:30:25 - __main__ - INFO - 开始单个工具部署: Nek5000
+2024-12-06 14:30:26 - agno.agent - DEBUG - Tool Call: clone_repository(repo_url=...)
+2024-12-06 14:30:27 - httpx - INFO - HTTP Request: POST https://llm.dp.tech/chat/completions
+2024-12-06 14:30:28 - agno.agent - DEBUG - Tool Result: {"success": true, ...}
 2024-12-06 14:35:10 - __main__ - INFO - 部署成功: Nek5000
 ```
+
+**日志级别说明**：
+- **DEBUG**: Agent 工具调用、LLM 交互细节、内部执行流程
+- **INFO**: 主要操作步骤、HTTP 请求、系统状态
+- **WARNING**: 警告信息、可恢复的错误
+- **ERROR**: 错误信息、失败的操作
 
 ## 故障排查
 
@@ -245,6 +274,30 @@ chmod 755 logs/
 ### 日志内容不完整
 
 确保程序正常退出（不要强制 Ctrl+C 中断），日志会在程序退出时完整写入。
+
+### DEBUG 日志未记录
+
+如果发现 Agent 的 DEBUG 日志没有记录到文件：
+
+1. **检查日志级别**：
+   ```python
+   # 在 main.py 中确认
+   logger.setLevel(logging.DEBUG)
+   file_handler.setLevel(logging.DEBUG)
+   ```
+
+2. **检查相关 Logger**：
+   ```python
+   # 确认相关库的 logger 已配置
+   logging.getLogger('agno').setLevel(logging.DEBUG)
+   logging.getLogger('httpx').setLevel(logging.DEBUG)
+   ```
+
+3. **查看日志文件**：
+   ```bash
+   # 查看是否有 DEBUG 日志
+   grep "DEBUG" logs/最新日志.log | head -20
+   ```
 
 ### 日志文件过大
 

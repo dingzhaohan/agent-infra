@@ -65,14 +65,14 @@ def setup_logging():
     
     # 配置根日志记录器
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)  # 设置为 DEBUG 以捕获所有日志
     
     # 清除已有的处理器（避免重复）
     logger.handlers.clear()
     
-    # 文件处理器：详细格式，包含时间戳
+    # 文件处理器：详细格式，包含时间戳，捕获 DEBUG 及以上级别
     file_handler = logging.FileHandler(log_path, encoding='utf-8')
-    file_handler.setLevel(logging.INFO)
+    file_handler.setLevel(logging.DEBUG)  # 文件记录所有级别，包括 DEBUG
     file_formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
@@ -80,13 +80,39 @@ def setup_logging():
     file_handler.setFormatter(file_formatter)
     
     # 控制台处理器：使用 RichHandler 保持美观输出
+    # 控制台只显示 INFO 及以上，避免过多 DEBUG 信息干扰
     console_handler = RichHandler(
         console=console,
         show_time=False,
         show_path=False,
-        markup=True
+        markup=True,
+        rich_tracebacks=True
     )
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(logging.INFO)  # 控制台保持 INFO 级别
+    
+    # 配置相关库的 logger 也输出 DEBUG 到文件
+    # 包括 Agno、httpx（HTTP 请求）、litellm（LLM 调用）等
+    related_loggers = [
+        'agno',
+        'agno.agent',
+        'agno.models',
+        'agno.tools',
+        'httpx',           # HTTP 客户端（Agno 使用）
+        'litellm',         # LLM 调用库
+        'openai',          # OpenAI SDK
+    ]
+    for logger_name in related_loggers:
+        related_logger = logging.getLogger(logger_name)
+        related_logger.setLevel(logging.DEBUG)
+        # 不直接添加 handler，让日志传播到根 logger
+        # 这样可以避免重复日志，同时确保所有日志都记录到文件
+        related_logger.propagate = True
+        # 确保这些 logger 不会阻止日志传播
+        related_logger.handlers = []  # 清除可能存在的 handler
+    
+    # 注意：Agno 的 debug_mode=True 可能会直接 print 到 stdout
+    # 这些输出会通过 RichHandler 显示在控制台，但不会自动记录到文件
+    # 如果需要捕获这些，可以考虑重定向 stdout/stderr（但可能影响 Rich 输出）
     
     # 添加处理器
     logger.addHandler(file_handler)
