@@ -31,6 +31,12 @@ DOCKER_MEMORY_LIMIT = os.getenv("DOCKER_MEMORY_LIMIT", "4g")
 GIT_CLONE_DEPTH = int(os.getenv("GIT_CLONE_DEPTH", "1"))  # 浅克隆
 GIT_TIMEOUT = int(os.getenv("GIT_TIMEOUT", "300"))  # 5分钟
 
+# Git 认证配置（用于克隆私有仓库）
+# 注意：用户名和密码会被 URL 编码，可以包含特殊字符（如 @ 符号）
+# 只对需要认证的域名（如 GitLab）注入认证信息，GitHub 等公开仓库不会注入
+GIT_USERNAME = os.getenv("GIT_USERNAME", "wangyi01@dp.tech")  # Git 用户名（如: wangyi01@dp.tech）
+GIT_PASSWORD = os.getenv("GIT_PASSWORD", "mima.0112")  # Git 密码或访问令牌
+
 # 工作流配置
 # MAX_RETRIES: Dockerfile 生成和验证的最大重试次数
 # - 当 verifier 检测到问题时，会调用 generator 修复 Dockerfile

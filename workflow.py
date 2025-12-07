@@ -65,6 +65,19 @@ class DeploymentResult:
     analysis_notes: str = ""
     generation_notes: str = ""
     verification_notes: str = ""
+    # 保存原始分析上下文，供修复时使用
+    dep_info: dict = None
+    readme_info: dict = None
+    analyzer_output: str = None  # 分析 Agent 的完整输出
+    
+    def __post_init__(self):
+        """初始化可变默认值"""
+        if self.dep_info is None:
+            self.dep_info = {}
+        if self.readme_info is None:
+            self.readme_info = {}
+        if self.analyzer_output is None:
+            self.analyzer_output = ""
     
     def to_dict(self) -> dict:
         return {
@@ -246,13 +259,27 @@ class RepoDeploymentWorkflow:
 5. 确定依赖管理方式和主要技术栈
 6. 给出部署策略建议
 
-请详细报告分析结果。
+**重要**：请详细输出你的分析结果，包括：
+- 技术栈和主要语言
+- 依赖管理方式（requirements.txt, setup.py, CMakeLists.txt 等）
+- 推荐的基础镜像
+- 需要安装的系统依赖
+- 编译步骤（如需要）
+- 特殊注意事项
+
+这些分析将被传递给下一个 Agent 用于生成 Dockerfile。
 """
         
-        # 运行分析 Agent
+        # 运行分析 Agent，捕获其输出
+        analyzer_response = None
         try:
             response = self.analyzer_agent.run(analysis_prompt)
-            logger.info(f"分析 Agent 响应完成")
+            # 保存 Agent 的响应用于后续步骤
+            if hasattr(response, 'content'):
+                analyzer_response = response.content
+            else:
+                analyzer_response = str(response)
+            logger.info(f"分析 Agent 响应完成，输出长度: {len(analyzer_response)}")
         except Exception as e:
             error_msg = str(e)
             
@@ -287,8 +314,17 @@ class RepoDeploymentWorkflow:
             return
         
         # 检查是否找到 Dockerfile
-        from tools.file_tools import find_dockerfile
+        from tools.file_tools import find_dockerfile, find_dependency_files, find_readme
         dockerfile_result = find_dockerfile(result.local_path)
+        
+        # 同时获取依赖和 README 信息（供后续使用）
+        dep_info = find_dependency_files(result.local_path)
+        readme_info = find_readme(result.local_path)
+        
+        # 保存分析上下文
+        result.dep_info = dep_info
+        result.readme_info = readme_info
+        result.analyzer_output = analyzer_response  # 保存分析 Agent 的完整输出
         
         if dockerfile_result["found"]:
             result.has_existing_dockerfile = True
@@ -310,6 +346,7 @@ class RepoDeploymentWorkflow:
             content=f"📋 分析完成\n"
                     f"本地路径: {result.local_path}\n"
                     f"现有 Dockerfile: {'是' if result.has_existing_dockerfile else '否'}\n"
+                    f"主要语言: {dep_info.get('primary_language', '未知')}\n"
                     f"{result.analysis_notes}",
             level="info"
         )
@@ -327,37 +364,44 @@ class RepoDeploymentWorkflow:
             level="info"
         )
         
-        # 获取依赖信息
-        from tools.file_tools import find_dependency_files, find_readme
-        
-        dep_info = find_dependency_files(result.local_path)
-        readme_info = find_readme(result.local_path)
+        # 使用已保存的分析上下文
+        dep_info = result.dep_info or {}
+        readme_info = result.readme_info or {}
+        analyzer_output = result.analyzer_output or "无分析输出"
         
         # 预期的 Dockerfile 路径
         expected_dockerfile_path = Path(result.local_path) / "Dockerfile.generated"
         
-        # 构建生成提示
+        # 构建生成提示 - 包含分析 Agent 的输出
         generation_prompt = f"""
-请为以下项目生成 Dockerfile：
+请为以下项目生成 Dockerfile。
 
+## 项目基本信息
 **工具名称**: {tool.name}
 **本地路径**: {result.local_path}
-**主要语言**: {dep_info.get('primary_language', '未知')}
-**依赖文件**: {json.dumps(dep_info.get('files', []), ensure_ascii=False)}
 **领域**: {tool.domain}
 
-**README 摘要**:
+## 分析 Agent 的详细分析（重要参考）
+{analyzer_output}
+
+## 项目依赖信息
+**主要语言**: {dep_info.get('primary_language', '未知')}
+**依赖文件**: {json.dumps(dep_info.get('files', []), ensure_ascii=False)}
+
+## README 摘要
 {readme_info.get('content', '无')[:2000]}
 
-请根据以上信息：
-1. 选择合适的 Dockerfile 模板
+## 任务要求
+根据上述**分析 Agent 的建议**和项目信息：
+1. 参考 Dockerfile 模版选择合适的基础镜像
 2. 根据项目特点自定义配置
-3. 添加必要的系统依赖（特别是科学计算相关的）
-4. 生成完整的 Dockerfile 并保存到仓库目录（文件名：Dockerfile.generated）
+3. 添加分析中提到的系统依赖
+4. 如果需要编译，参考分析中的编译步骤
+5. 生成完整的 Dockerfile 并保存（文件名：Dockerfile.generated）
 
 如果是科学计算工具，请特别注意：
 - 可能需要 BLAS/LAPACK 库
-- 可能需要 Fortran 编译器
+- 可能需要 Fortran 编译器（gfortran）
 - 可能需要 HDF5 支持
 - 可能需要 MPI 并行支持
 
@@ -524,42 +568,77 @@ class RepoDeploymentWorkflow:
                     # 需要修复 Dockerfile
                     
                     yield WorkflowMessage(
-                        content=f"⚠️ 第 {attempt + 1} 次验证发现问题，尝试自动修复...\n"
+                        content=f"⚠️ 第 {attempt + 1} 次验证发现问题，尝试重写 Dockerfile...\n"
                                 f"问题: {error_summary}\n"
                                 f"缺失依赖: {', '.join(missing_deps) if missing_deps else '无'}",
                         level="warning"
                     )
                     
-                    # 调用生成器 Agent 修复 Dockerfile
+                    # 读取当前的 Dockerfile（用于参考）
+                    current_dockerfile = ""
+                    try:
+                        with open(result.dockerfile_path, 'r') as f:
+                            current_dockerfile = f.read()
+                    except Exception as e:
+                        logger.warning(f"无法读取当前 Dockerfile: {e}")
+                    
+                    # 构建包含完整上下文的修复提示
                     fix_prompt = f"""
-请修复 Dockerfile 以解决以下问题：
+请重写 Dockerfile 以解决验证中发现的问题。
 
+## 项目基本信息
 **工具名称**: {tool.name}
 **领域**: {tool.domain}
-**Dockerfile 路径**: {result.dockerfile_path}
+**本地路径**: {result.local_path}
+**主要语言**: {getattr(result, 'dep_info', {}).get('primary_language', '未知')}
+**依赖文件**: {json.dumps(getattr(result, 'dep_info', {}).get('files', []), ensure_ascii=False)}
 
-**验证发现的问题**:
-{error_summary}
+## 分析 Agent 的原始分析（重要参考）
+{getattr(result, 'analyzer_output', '无')[:3000]}
 
-**缺失的依赖**: {', '.join(missing_deps) if missing_deps else '无'}
+## README 摘要
+{getattr(result, 'readme_info', {}).get('content', '无')[:2000]}
+
+## 当前 Dockerfile（第 {attempt + 1} 次尝试）
+```dockerfile
+{current_dockerfile}
+```
+
+## 验证失败的问题
+**错误摘要**: {error_summary}
+
+**缺失的依赖**: 
+{chr(10).join(f'- {dep}' for dep in missing_deps) if missing_deps else '无'}
 
 **修复建议**:
 {chr(10).join(f'- {s}' for s in fix_suggestions) if fix_suggestions else '无'}
 
-请使用 patch_dockerfile 工具获取当前 Dockerfile，然后生成修复后的版本。
+## 任务要求
+请根据上述信息**重写完整的 Dockerfile**，而不是修补。重点：
 
-对于科学计算工具，请确保包含：
-- 完整的编译工具链：gfortran, gcc, g++, make, cmake
-- MPI 支持：openmpi-bin, libopenmpi-dev
-- HDF5 支持：libhdf5-openmpi-dev, hdf5-tools
-- 其他必要的科学计算库
+1. **从头开始设计** - 根据项目需求选择最合适的基础镜像和模版
+2. **确保包含所有依赖** - 特别注意验证中发现缺失的依赖
+3. **科学计算工具必备组件**：
+   - 完整编译工具链：gcc, g++, gfortran, make, cmake, build-essential
+   - MPI 支持（如需要）：openmpi-bin, libopenmpi-dev, mpicc, mpifort
+   - 数学库：libblas-dev, liblapack-dev, libfftw3-dev
+   - HDF5 支持：libhdf5-dev, hdf5-tools
+   - Python 科学计算：numpy, scipy, matplotlib, ase
+4. **遵循最佳实践**：
+   - 层优化（合并命令）
+   - 缓存清理（apt: rm -rf /var/lib/apt/lists/*, pip: --no-cache-dir）
+   - 环境变量双配置（ENV + bashrc）
+   - 临时文件清理
+5. **不要设置限制性的 ENTRYPOINT** - 使用 WORKDIR /root 即可
+
+请使用 save_dockerfile 工具将重写的 Dockerfile 保存到 {result.local_path}，文件名：Dockerfile.generated
 """
                     
                     try:
                         self.generator_agent.run(fix_prompt)
                         
                         yield WorkflowMessage(
-                            content=f"🔧 Dockerfile 已修复，准备重新验证...",
+                            content=f"🔧 Dockerfile 已重写（尝试 {attempt + 2}/{max_retries}），准备重新验证...",
                             level="info"
                         )
                         
@@ -568,7 +647,7 @@ class RepoDeploymentWorkflow:
                         
                     except Exception as e:
                         yield WorkflowMessage(
-                            content=f"❌ Dockerfile 修复失败: {str(e)}",
+                            content=f"❌ Dockerfile 重写失败: {str(e)}",
                             level="error"
                         )
                 
