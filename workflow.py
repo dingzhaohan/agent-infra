@@ -165,17 +165,16 @@ class RepoDeploymentWorkflow:
                 )
                 return result
             
-            # 阶段 2: Dockerfile 生成（如果需要）
-            if not result.has_existing_dockerfile:
-                for msg in self._generate_dockerfile(tool, result):
-                    yield msg
-                
-                if result.status == DeploymentStatus.FAILED:
-                    yield WorkflowMessage(
-                        content=f"❌ Dockerfile 生成失败: {result.error_message}",
-                        level="error"
-                    )
-                    return result
+            # 阶段 2: 始终生成新的 Dockerfile
+            for msg in self._generate_dockerfile(tool, result):
+                yield msg
+            
+            if result.status == DeploymentStatus.FAILED:
+                yield WorkflowMessage(
+                    content=f"❌ Dockerfile 生成失败: {result.error_message}",
+                    level="error"
+                )
+                return result
             
             # 阶段 3: 构建和验证
             if not skip_verification:
@@ -254,10 +253,9 @@ class RepoDeploymentWorkflow:
 请执行以下步骤：
 1. 克隆仓库到本地（目录名使用: {tool.repo_name}）
 2. 分析项目结构
-3. 查找现有的 Dockerfile
-4. 读取 README 了解安装方式
-5. 确定依赖管理方式和主要技术栈
-6. 给出部署策略建议
+3. 读取 README 了解安装方式
+4. 确定依赖管理方式和主要技术栈
+5. 给出部署策略建议
 
 **重要**：请详细输出你的分析结果，包括：
 - 技术栈和主要语言
@@ -267,6 +265,7 @@ class RepoDeploymentWorkflow:
 - 编译步骤（如需要）
 - 特殊注意事项
 
+**注意**：即使仓库中有现成的 Dockerfile，我们也会生成新的优化版本。
 这些分析将被传递给下一个 Agent 用于生成 Dockerfile。
 """
         
@@ -313,7 +312,7 @@ class RepoDeploymentWorkflow:
             )
             return
         
-        # 检查是否找到 Dockerfile
+        # 检查是否找到 Dockerfile（仅作为参考信息）
         from tools.file_tools import find_dockerfile, find_dependency_files, find_readme
         dockerfile_result = find_dockerfile(result.local_path)
         
@@ -326,26 +325,19 @@ class RepoDeploymentWorkflow:
         result.readme_info = readme_info
         result.analyzer_output = analyzer_response  # 保存分析 Agent 的完整输出
         
+        # 始终标记为需要生成 Dockerfile（不使用原仓库的）
+        result.has_existing_dockerfile = False
+        result.dockerfile_path = ""
+        
+        # 记录是否找到了原有 Dockerfile（仅作参考）
         if dockerfile_result["found"]:
-            result.has_existing_dockerfile = True
-            result.dockerfile_path = dockerfile_result["primary_dockerfile"]
-            result.analysis_notes = f"找到现有 Dockerfile: {result.dockerfile_path}"
-            
-            # 验证 Dockerfile 文件确实存在
-            if not Path(result.dockerfile_path).exists():
-                logger.warning(f"Dockerfile 路径无效: {result.dockerfile_path}")
-                result.has_existing_dockerfile = False
-                result.dockerfile_path = ""
-                result.analysis_notes = "Dockerfile 路径无效，需要生成"
+            result.analysis_notes = f"发现原有 Dockerfile: {dockerfile_result['primary_dockerfile']}（将生成新的）"
         else:
-            result.has_existing_dockerfile = False
-            result.dockerfile_path = ""
-            result.analysis_notes = "未找到 Dockerfile，需要生成"
+            result.analysis_notes = "未找到 Dockerfile，将生成新的"
         
         yield WorkflowMessage(
             content=f"📋 分析完成\n"
                     f"本地路径: {result.local_path}\n"
-                    f"现有 Dockerfile: {'是' if result.has_existing_dockerfile else '否'}\n"
                     f"主要语言: {dep_info.get('primary_language', '未知')}\n"
                     f"{result.analysis_notes}",
             level="info"
