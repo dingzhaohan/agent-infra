@@ -98,9 +98,7 @@ def setup_logging():
         'agno',
         'agno.agent',
         'agno.models',
-        'agno.tools',
-        'litellm',         # LLM 调用库
-        'openai',          # OpenAI SDK
+        'agno.tools'
     ]
     for logger_name in debug_loggers:
         related_logger = logging.getLogger(logger_name)
@@ -116,6 +114,8 @@ def setup_logging():
         'hpack',           # HTTP/2 头部压缩
         'h11',             # HTTP/1.1 协议
         'h2',              # HTTP/2 协议
+        'openai',          # OpenAI SDK
+        'litellm',         # LLM 调用库
     ]
     for logger_name in noisy_loggers:
         related_logger = logging.getLogger(logger_name)
