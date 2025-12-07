@@ -96,10 +96,7 @@ def setup_logging():
         'agno',
         'agno.agent',
         'agno.models',
-        'agno.tools',
-        'httpx',           # HTTP 客户端（Agno 使用）
-        'litellm',         # LLM 调用库
-        'openai',          # OpenAI SDK
+        'agno.tools'
     ]
     for logger_name in related_loggers:
         related_logger = logging.getLogger(logger_name)
@@ -107,8 +104,24 @@ def setup_logging():
         # 不直接添加 handler，让日志传播到根 logger
         # 这样可以避免重复日志，同时确保所有日志都记录到文件
         related_logger.propagate = True
-        # 确保这些 logger 不会阻止日志传播
-        related_logger.handlers = []  # 清除可能存在的 handler
+        related_logger.handlers = []
+    
+    # HTTP 底层库：设置为 WARNING 级别，避免过多 DEBUG 日志
+    # 这些库会产生大量的 HTTP 连接、TLS、编码等细节日志
+    noisy_loggers = [
+        'httpx',           # HTTP 客户端
+        'httpcore',        # HTTP 核心库（连接、TLS 等）
+        'hpack',           # HTTP/2 头部压缩
+        'h11',             # HTTP/1.1 协议
+        'h2',              # HTTP/2 协议
+        'openai',          # OpenAI SDK
+        'litellm',         # LLM 调用库
+    ]
+    for logger_name in noisy_loggers:
+        related_logger = logging.getLogger(logger_name)
+        related_logger.setLevel(logging.WARNING)  # 只记录警告和错误
+        related_logger.propagate = True
+        related_logger.handlers = []
     
     # 注意：Agno 的 debug_mode=True 可能会直接 print 到 stdout
     # 这些输出会通过 RichHandler 显示在控制台，但不会自动记录到文件
