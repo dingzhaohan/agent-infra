@@ -507,6 +507,7 @@ class RepoDeploymentWorkflow:
 - 如果镜像构建成功但缺少关键工具（如 gfortran、gcc、make），必须报告为失败
 - 必须明确列出所有缺失的依赖
 - 提供具体的修复建议
+
 """
             
             # 运行验证 Agent
@@ -540,7 +541,11 @@ class RepoDeploymentWorkflow:
             
             # 根据验证结果决定下一步
             if verification_result:
-                overall_status = verification_result.get("overall_status", "failed")
+                yield WorkflowMessage(
+                    content=f"验证结果: 已经找到验证结果文件: {temp_file}",
+                    level="info"
+                )
+                overall_status = verification_result.get("overall_status", "needs_fix")
                 # 提前提取这些变量，确保在所有分支都可用
                 error_summary = verification_result.get("error_summary", "")
                 missing_deps = verification_result.get("missing_dependencies", [])
@@ -556,7 +561,7 @@ class RepoDeploymentWorkflow:
                     )
                     return
                 
-                elif overall_status == "needs_fix" and attempt < max_retries - 1:
+                elif (overall_status == "needs_fix" or overall_status == "failed") and attempt < max_retries - 1:
                     # 需要修复 Dockerfile
                     
                     yield WorkflowMessage(
@@ -654,6 +659,10 @@ class RepoDeploymentWorkflow:
                         )
             else:
                 # 没有收到结构化的验证结果，使用简化检查
+                yield WorkflowMessage(
+                    content=f"验证结果: 未找到验证结果文件: {temp_file}, 使用简化检查",
+                    level="info"
+                )
                 from tools.docker_tools import build_docker_image, run_docker_container
                 
                 build_result = build_docker_image(
