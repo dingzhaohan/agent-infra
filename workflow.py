@@ -397,6 +397,60 @@ class RepoDeploymentWorkflow:
 - 可能需要 HDF5 支持
 - 可能需要 MPI 并行支持
 
+## 必需的基础组件（所有 Dockerfile 都必须包含）
+
+### 1. SSH 和 Supervisor 配置
+
+在 Dockerfile 中必须添加以下内容（在安装项目依赖之后）：
+
+```dockerfile
+# 安装 SSH 和 Supervisor
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    supervisor \\
+    net-tools \\
+    openssh-server \\
+    && rm -rf /var/lib/apt/lists/*
+
+# 配置 Supervisor
+RUN cat > /etc/supervisord.conf << 'EOF'
+[supervisord]
+nodaemon=true
+logfile=/var/log/supervisor/supervisord.log
+pidfile=/var/run/supervisord.pid
+
+[program:sshd]
+command=/usr/sbin/sshd -D
+EOF
+
+# 配置 SSH
+RUN cat >> /etc/ssh/sshd_config << 'EOF'
+ClientAliveInterval 60
+ClientAliveCountMax 3
+EOF
+
+RUN mkdir -p /var/run/sshd && \\
+    mkdir -p /var/log/supervisor && \\
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/g' /etc/ssh/sshd_config && \\
+    sed -i 's/UsePAM yes/UsePAM no/g' /etc/ssh/sshd_config
+```
+
+### 2. MCP 支持
+
+在 Python 环境配置部分添加：
+
+```dockerfile
+# 安装 MCP
+RUN pip install --no-cache-dir mcp
+```
+
+## 重要提示
+- 以上 SSH 和 MCP 配置是**强制要求**，所有 Dockerfile 都必须包含
+- SSH 配置应该在项目依赖安装完成之后添加
+- 确保使用 `--no-install-recommends` 和 `rm -rf /var/lib/apt/lists/*` 减小镜像体积
+- Supervisor 配置文件中的 `pidfile` 应该是 `/var/run/supervisord.pid`（不是 `.log`）
+- sshd 命令应该使用 `-D` 参数在前台运行
+- 不需要设置 root 密码，只安装和配置 SSH 服务即可
+
 **重要**: 请使用 save_dockerfile 工具将生成的 Dockerfile 保存到 {result.local_path}
 """
         
@@ -627,6 +681,60 @@ class RepoDeploymentWorkflow:
    - 环境变量双配置（ENV + bashrc）
    - 临时文件清理
 5. **不要设置限制性的 ENTRYPOINT** - 使用 WORKDIR /root 即可
+
+## 必需的基础组件（所有 Dockerfile 都必须包含）
+
+### 1. SSH 和 Supervisor 配置
+
+在 Dockerfile 中必须添加以下内容（在安装项目依赖之后）：
+
+```dockerfile
+# 安装 SSH 和 Supervisor
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    supervisor \\
+    net-tools \\
+    openssh-server \\
+    && rm -rf /var/lib/apt/lists/*
+
+# 配置 Supervisor
+RUN cat > /etc/supervisord.conf << 'EOF'
+[supervisord]
+nodaemon=true
+logfile=/var/log/supervisor/supervisord.log
+pidfile=/var/run/supervisord.pid
+
+[program:sshd]
+command=/usr/sbin/sshd -D
+EOF
+
+# 配置 SSH
+RUN cat >> /etc/ssh/sshd_config << 'EOF'
+ClientAliveInterval 60
+ClientAliveCountMax 3
+EOF
+
+RUN mkdir -p /var/run/sshd && \\
+    mkdir -p /var/log/supervisor && \\
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/g' /etc/ssh/sshd_config && \\
+    sed -i 's/UsePAM yes/UsePAM no/g' /etc/ssh/sshd_config
+```
+
+### 2. MCP 支持
+
+在 Python 环境配置部分添加：
+
+```dockerfile
+# 安装 MCP
+RUN pip install --no-cache-dir mcp
+```
+
+## 重要提示
+- 以上 SSH 和 MCP 配置是**强制要求**，所有 Dockerfile 都必须包含
+- SSH 配置应该在项目依赖安装完成之后添加
+- 确保使用 `--no-install-recommends` 和 `rm -rf /var/lib/apt/lists/*` 减小镜像体积
+- Supervisor 配置文件中的 `pidfile` 应该是 `/var/run/supervisord.pid`（不是 `.log`）
+- sshd 命令应该使用 `-D` 参数在前台运行
+- 不需要设置 root 密码，只安装和配置 SSH 服务即可
 
 请使用 save_dockerfile 工具将重写的 Dockerfile 保存到 {result.local_path}，文件名：Dockerfile.generated
 """
