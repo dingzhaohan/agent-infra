@@ -2,6 +2,30 @@
 
 ## 最新更新
 
+### 10. Docker 构建环境自动注入非交互变量 (2025-12-08)
+
+**问题**: 
+- 第三方仓库自带的 Dockerfile 往往缺少 `GIT_TERMINAL_PROMPT=0` 和 `DEBIAN_FRONTEND=noninteractive`
+- 批量构建时，一旦某个 Dockerfile 在 `git clone`、`apt-get install` 等步骤要求交互输入，构建就会卡死
+- 并发批量运行时，单个任务卡死会阻塞所有排队任务
+
+**解决方案**:
+- 在 `build_docker_image()` 中统一注入防卡死环境变量（仅在原 Dockerfile 缺失时自动添加）
+  - `ENV GIT_TERMINAL_PROMPT=0`：禁用 Git 交互提示
+  - `ENV DEBIAN_FRONTEND=noninteractive`：强制 apt/tzdata 等进入非交互模式
+- 注入逻辑对原仓库透明：构建前写入、构建后恢复，确保不污染源码
+- 多阶段 Dockerfile 会在每个 `FROM` 段后自动获得相同环境变量
+
+**效果**:
+- ✅ 构建不会因为 Git/TZData 等交互提示而挂起
+- ✅ 批量构建稳定性显著提升
+- ✅ 适用于项目自带 Dockerfile 与自动生成的 Dockerfile
+
+**相关文件**:
+- `tools/docker_tools.py`
+
+---
+
 ### 9. Docker 镜像命名格式配置 (2025-12-06)
 
 **问题**: 
@@ -232,6 +256,28 @@ echo "MAX_RETRIES=20" >> .env
 
 ---
 
+### 10. ✅ 批量构建自动注入非交互环境
+
+**问题**: 
+- 第三方仓库 Dockerfile 常缺少 `GIT_TERMINAL_PROMPT` / `DEBIAN_FRONTEND`
+- 批量构建时一旦遇到交互式 git/apt 命令便会无限等待
+
+**修复**:
+- `build_docker_image()` 在构建前动态注入：
+  - `ENV GIT_TERMINAL_PROMPT=0`
+  - `ENV DEBIAN_FRONTEND=noninteractive`
+- 多阶段 Dockerfile 的每个 `FROM` 段都会收到相同环境变量
+- 构建完成后自动还原原始 Dockerfile，避免污染仓库
+
+**效果**:
+- ✅ 防止 git clone/apt 命令在批量模式下卡死
+- ✅ 兼容所有历史 Dockerfile
+- ✅ 并发构建稳定性显著提升
+
+**文件**: `tools/docker_tools.py`
+
+---
+
 ## 修改的文件清单
 
 ### 核心功能文件
@@ -248,6 +294,7 @@ echo "MAX_RETRIES=20" >> .env
 3. **tools/docker_tools.py**
    - 修复 `_detect_build_context()` 函数
    - 改进构建上下文检测逻辑
+   - 批量构建前自动注入 `GIT_TERMINAL_PROMPT` / `DEBIAN_FRONTEND` 并在构建后还原
 
 4. **main.py**
    - 增强日志配置，捕获 DEBUG 日志
@@ -368,6 +415,7 @@ python view_logs.py --latest --grep "DEBUG" | head -50
 - ✅ SuiteSparse 从根目录构建所有子包
 - ✅ FEBio 可以正确构建
 - ✅ Dockerfile 自动添加 GIT_TERMINAL_PROMPT=0
+- ✅ 批量构建自动注入非交互环境，第三方 Dockerfile 不会卡死
 - ✅ 日志文件包含完整的 DEBUG 信息
 - ✅ Verifier Agent 正常工作
 - ✅ 所有变量正确访问

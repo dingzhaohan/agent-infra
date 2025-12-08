@@ -83,6 +83,46 @@ def _detect_build_context(dockerfile_path: Path) -> tuple[str, str]:
     return str(dockerfile_path.parent), dockerfile_path.name
 
 
+def _inject_build_safeguards(content: str) -> tuple[str, bool]:
+    """
+    为 Dockerfile 自动注入防卡死环境变量
+
+    - ENV GIT_TERMINAL_PROMPT=0 防止 git clone 交互式提示
+    - ENV DEBIAN_FRONTEND=noninteractive 防止 apt 等命令等待输入
+    """
+    needs_git_prompt = "GIT_TERMINAL_PROMPT" not in content
+    needs_debian_env = "DEBIAN_FRONTEND" not in content
+
+    if not (needs_git_prompt or needs_debian_env):
+        return content, False
+
+    env_lines = []
+    if needs_git_prompt:
+        env_lines.append("ENV GIT_TERMINAL_PROMPT=0")
+    if needs_debian_env:
+        env_lines.append("ENV DEBIAN_FRONTEND=noninteractive")
+
+    lines = content.splitlines()
+    new_lines = []
+    inserted = False
+
+    for line in lines:
+        new_lines.append(line)
+        stripped = line.strip().upper()
+        if stripped.startswith("FROM"):
+            new_lines.extend(env_lines)
+            inserted = True
+
+    if not inserted:
+        new_lines = env_lines + new_lines
+
+    updated = "\n".join(new_lines)
+    if content.endswith("\n"):
+        updated += "\n"
+
+    return updated, True
+
+
 def build_docker_image(
     dockerfile_path: str,
     image_name: str,
@@ -128,16 +168,37 @@ def build_docker_image(
         
         full_tag = f"{image_name}:{tag}"
         
-        # 构建镜像
-        image, logs = client.images.build(
-            path=build_context,
-            dockerfile=dockerfile,
-            tag=full_tag,
-            buildargs=build_args or {},
-            nocache=no_cache,
-            timeout=timeout,
-            rm=True  # 构建后删除中间容器
-        )
+        dockerfile_abs_path = Path(build_context) / dockerfile
+        original_dockerfile_content = None
+        dockerfile_modified = False
+
+        try:
+            if dockerfile_abs_path.exists():
+                original_dockerfile_content = dockerfile_abs_path.read_text()
+                improved_content, dockerfile_modified = _inject_build_safeguards(original_dockerfile_content)
+                if dockerfile_modified:
+                    dockerfile_abs_path.write_text(improved_content)
+        except Exception:
+            dockerfile_modified = False
+            original_dockerfile_content = None
+
+        try:
+            # 构建镜像
+            image, logs = client.images.build(
+                path=build_context,
+                dockerfile=dockerfile,
+                tag=full_tag,
+                buildargs=build_args or {},
+                nocache=no_cache,
+                timeout=timeout,
+                rm=True  # 构建后删除中间容器
+            )
+        finally:
+            if dockerfile_modified and original_dockerfile_content is not None:
+                try:
+                    dockerfile_abs_path.write_text(original_dockerfile_content)
+                except Exception:
+                    pass
         
         # 收集构建日志
         build_logs = []
