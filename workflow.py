@@ -391,6 +391,41 @@ class RepoDeploymentWorkflow:
 4. 如果需要编译，参考分析中的编译步骤
 5. 生成完整的 Dockerfile 并保存（文件名：Dockerfile.generated）
 
+## 获取源码的方式
+
+如果需要从源码构建，**可以直接在 Dockerfile 中获取源码**：
+
+### 方式 1: 使用 git clone（推荐）
+
+```dockerfile
+# 克隆源码
+RUN git clone {tool.homepage} /tmp/source && \\
+    cd /tmp/source && \\
+    # 编译安装
+    ./configure --prefix=/usr/local && \\
+    make && make install && \\
+    # 清理
+    cd / && rm -rf /tmp/source
+```
+
+### 方式 2: 使用 wget/tar
+
+```dockerfile
+# 下载并解压源码
+RUN wget https://example.com/tool-1.0.tar.gz -O /tmp/tool.tar.gz && \\
+    tar -xzf /tmp/tool.tar.gz -C /tmp && \\
+    cd /tmp/tool-1.0 && \\
+    # 编译安装
+    ./configure && make && make install && \\
+    # 清理
+    cd / && rm -rf /tmp/tool* 
+```
+
+**注意**：
+- 不需要使用 `COPY` 从本地复制源码
+- 直接在 Dockerfile 中下载源码更简洁
+- 记得在编译后清理源码目录以减小镜像大小
+
 如果是科学计算工具，请特别注意：
 - 可能需要 BLAS/LAPACK 库
 - 可能需要 Fortran 编译器（gfortran）
@@ -681,6 +716,41 @@ RUN pip install --no-cache-dir mcp
    - 环境变量双配置（ENV + bashrc）
    - 临时文件清理
 5. **不要设置限制性的 ENTRYPOINT** - 使用 WORKDIR /root 即可
+
+## 获取源码的方式
+
+如果需要从源码构建，**可以直接在 Dockerfile 中获取源码**：
+
+### 方式 1: 使用 git clone（推荐）
+
+```dockerfile
+# 克隆源码
+RUN git clone {tool.homepage} /tmp/source && \\
+    cd /tmp/source && \\
+    # 编译安装
+    ./configure --prefix=/usr/local && \\
+    make && make install && \\
+    # 清理
+    cd / && rm -rf /tmp/source
+```
+
+### 方式 2: 使用 wget/tar
+
+```dockerfile
+# 下载并解压源码
+RUN wget https://example.com/tool-1.0.tar.gz -O /tmp/tool.tar.gz && \\
+    tar -xzf /tmp/tool.tar.gz -C /tmp && \\
+    cd /tmp/tool-1.0 && \\
+    # 编译安装
+    ./configure && make && make install && \\
+    # 清理
+    cd / && rm -rf /tmp/tool* 
+```
+
+**注意**：
+- 不需要使用 `COPY` 从本地复制源码
+- 直接在 Dockerfile 中下载源码更简洁
+- 记得在编译后清理源码目录以减小镜像大小
 
 ## 必需的基础组件（所有 Dockerfile 都必须包含）
 
