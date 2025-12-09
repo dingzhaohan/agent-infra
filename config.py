@@ -3,6 +3,7 @@
 """
 import os
 from pathlib import Path
+from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -52,8 +53,12 @@ MAX_CONCURRENT_TOOLS = int(os.getenv("MAX_CONCURRENT_TOOLS", "2"))
 # Docker 镜像配置
 # DOCKER_REGISTRY: Docker 镜像仓库地址
 # DOCKER_NAMESPACE: Docker 镜像命名空间
-# DOCKER_TAG: Docker 镜像默认标签
+# DOCKER_TAG: Docker 镜像标签（默认使用时间戳，避免缓存问题）
 DOCKER_REGISTRY = os.getenv("DOCKER_REGISTRY", "registry.dp.tech")
 DOCKER_NAMESPACE = os.getenv("DOCKER_NAMESPACE", "davinci")
-DOCKER_TAG = os.getenv("DOCKER_TAG", "latest")
+
+# 生成时间戳标签（格式: 20251209-143022）
+# 如果环境变量中设置了 DOCKER_TAG，则使用环境变量的值
+_default_tag = datetime.now().strftime("%Y%m%d-%H%M%S")
+DOCKER_TAG = os.getenv("DOCKER_TAG", _default_tag)
 
