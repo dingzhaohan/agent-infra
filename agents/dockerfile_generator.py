@@ -10,6 +10,12 @@ import json
 from config import OPENAI_MODEL, OPENAI_API_BASE
 from tools.file_tools import write_dockerfile
 from tools.terminal_tools import read_file_content
+from tools.web_search import (
+    web_search,
+    search_dockerfile_example,
+    search_error_solution,
+    format_search_results_for_llm
+)
 
 
 # Dockerfile 模板
@@ -704,6 +710,52 @@ def patch_dockerfile(
     }, ensure_ascii=False)
 
 
+@tool
+def search_web_for_dockerfile(query: str, count: int = 3) -> str:
+    """
+    在网上搜索 Dockerfile 示例和最佳实践
+    
+    Args:
+        query: 搜索关键词
+        count: 返回结果数量（默认3条）
+    
+    Returns:
+        格式化的搜索结果
+    
+    示例用法：
+        search_web_for_dockerfile("LAMMPS dockerfile example")
+        search_web_for_dockerfile("python scientific computing dockerfile best practices")
+    """
+    result = web_search(query, count)
+    
+    if result["success"]:
+        formatted = format_search_results_for_llm(result["results"])
+        return f"找到 Dockerfile 相关资料：\n\n{formatted}"
+    else:
+        return f"搜索失败: {result['message']}"
+
+
+@tool
+def search_dockerfile_examples(tool_name: str, language: str = "") -> str:
+    """
+    搜索特定工具的 Dockerfile 示例
+    
+    Args:
+        tool_name: 工具名称
+        language: 主要编程语言（可选）
+    
+    Returns:
+        格式化的搜索结果
+    """
+    result = search_dockerfile_example(tool_name, language)
+    
+    if result["success"]:
+        formatted = format_search_results_for_llm(result["results"])
+        return f"找到 {tool_name} 的 Dockerfile 示例：\n\n{formatted}"
+    else:
+        return f"搜索失败: {result['message']}"
+
+
 def create_dockerfile_generator_agent() -> Agent:
     """
     创建 Dockerfile 生成 Agent
@@ -712,6 +764,7 @@ def create_dockerfile_generator_agent() -> Agent:
     1. 根据项目分析结果选择合适的模板
     2. 自定义和优化 Dockerfile
     3. 处理特殊依赖和配置
+    4. 可通过 web 搜索查找 Dockerfile 示例和最佳实践
     """
     return Agent(
         name="DockerfileGenerator",
@@ -723,6 +776,8 @@ def create_dockerfile_generator_agent() -> Agent:
             read_existing_dockerfile,
             read_dependency_file,
             patch_dockerfile,
+            search_web_for_dockerfile,
+            search_dockerfile_examples,
         ],
         description="Dockerfile 生成专家，根据项目分析生成最优的 Dockerfile",
         instructions=[

@@ -62,3 +62,7 @@ DOCKER_NAMESPACE = os.getenv("DOCKER_NAMESPACE", "davinci")
 _default_tag = datetime.now().strftime("%Y%m%d-%H%M%S")
 DOCKER_TAG = os.getenv("DOCKER_TAG", _default_tag)
 
+# Web Search 配置（用于搜索安装文档、解决方案等）
+SEARCH_KEY = os.getenv("SEARCH_KEY", "Rg3aVWsCPjXw2Fiq7EtnEcLT")
+SEARCH_BASE_URL = os.getenv("SEARCH_BASE_URL", "https://www.searchapi.io/")
+

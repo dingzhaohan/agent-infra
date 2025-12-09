@@ -16,6 +16,11 @@ from tools.file_tools import (
     find_dependency_files,
     find_ci_cd_files
 )
+from tools.web_search import (
+    web_search,
+    search_installation_guide,
+    format_search_results_for_llm
+)
 
 
 # 定义 Agno 工具函数
@@ -154,6 +159,56 @@ def get_ci_cd_info(repo_path: str) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
+@tool
+def search_web(query: str, count: int = 5) -> str:
+    """
+    在网上搜索相关信息（用于查找安装文档、解决方案等）
+    
+    Args:
+        query: 搜索关键词
+        count: 返回结果数量（默认5条）
+    
+    Returns:
+        格式化的搜索结果
+    
+    示例用法：
+        search_web("LAMMPS installation guide ubuntu")
+        search_web("how to install scipy from source")
+    """
+    result = web_search(query, count)
+    
+    if result["success"]:
+        formatted = format_search_results_for_llm(result["results"])
+        return f"搜索成功，找到 {len(result['results'])} 条结果：\n\n{formatted}"
+    else:
+        return f"搜索失败: {result['message']}"
+
+
+@tool
+def search_installation_docs(tool_name: str, language: str = "") -> str:
+    """
+    搜索工具的安装文档
+    
+    Args:
+        tool_name: 工具名称
+        language: 主要编程语言（可选，如 "python", "c++"）
+    
+    Returns:
+        格式化的搜索结果
+    
+    示例用法：
+        search_installation_docs("LAMMPS", "c++")
+        search_installation_docs("scikit-learn", "python")
+    """
+    result = search_installation_guide(tool_name, language)
+    
+    if result["success"]:
+        formatted = format_search_results_for_llm(result["results"])
+        return f"找到安装文档：\n\n{formatted}"
+    else:
+        return f"搜索失败: {result['message']}"
+
+
 def create_repo_analyzer_agent() -> Agent:
     """
     创建仓库分析 Agent
@@ -162,6 +217,7 @@ def create_repo_analyzer_agent() -> Agent:
     1. 克隆仓库到本地
     2. 分析项目结构
     3. 确定最佳部署策略
+    4. 可通过 web 搜索查找安装文档和解决方案
     """
     return Agent(
         name="RepoAnalyzer",
@@ -175,6 +231,8 @@ def create_repo_analyzer_agent() -> Agent:
             get_readme_content,
             get_dependency_info,
             get_ci_cd_info,
+            search_web,
+            search_installation_docs,
         ],
         description="开源仓库分析专家，负责分析仓库结构并确定部署策略",
         instructions=[
